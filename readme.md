@@ -1,4 +1,4 @@
-# Arthas-II
+## Arthas-X
 
 
 # Informações importantes
@@ -11,3 +11,5 @@ O comando anterior registra o caminho para o submódulo. O comando a seguir efet
 ```
 git submodule update
 ```
+
+Este repositório foi cirado a partir do repositório Arthas-II, se quiser ver o histórico de commits, vá para tal repositório.
