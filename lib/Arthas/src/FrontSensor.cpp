@@ -10,13 +10,18 @@ namespace {
     const uint8_t calibrationSamples = 10;
 
     const uint16_t adcMaxValue = 4095;      // 12 bits
+
+    /* Faixa mínima entre o branco e o preto para o sensor ser considerado vivo.
+     * Um canal queimado ou desconectado calibra com faixa ~0. */
+    const uint16_t minimumCalibrationRange = 100;
 }
 
 FrontSensor::FrontSensor(const uint8_t commonPin, const uint8_t* selectPins, const uint8_t numberOfSensors):
     commonPin(commonPin),
     numberOfSensors(numberOfSensors > maxSensors ? maxSensors : numberOfSensors),
     calibrated(false),
-    lastLinePosition(0)
+    lastLinePosition(0),
+    lineEverSeen(false)
 {
     for (uint8_t i = 0; i < 4; i++) {
         this->selectPins[i] = selectPins[i];
@@ -25,6 +30,7 @@ FrontSensor::FrontSensor(const uint8_t commonPin, const uint8_t* selectPins, con
     for (uint8_t i = 0; i < maxSensors; i++) {
         calibrationMin[i] = adcMaxValue;
         calibrationMax[i] = 0;
+        sensorEnabled[i] = true;
     }
 
     lastLinePosition = (this->numberOfSensors - 1) * 500;
@@ -83,6 +89,13 @@ void FrontSensor::calibrate() {
         }
     }
 
+    /* Faixa nula ou minúscula = canal morto. Deixá-lo na conta seria pior que
+     * ignorá-lo: ele viraria um "branco" permanente na posição da linha. */
+    for (uint8_t i = 0; i < numberOfSensors; i++) {
+        sensorEnabled[i] = calibrationMax[i] > calibrationMin[i] &&
+                           (calibrationMax[i] - calibrationMin[i]) >= minimumCalibrationRange;
+    }
+
     calibrated = true;
 }
 
@@ -90,11 +103,18 @@ void FrontSensor::readCalibrated(uint16_t* sensorValues) {
     readRaw(sensorValues);
 
     for (uint8_t i = 0; i < numberOfSensors; i++) {
+        /* 1000 = preto = "não vejo linha". Reportar 0 aqui faria o sensor
+         * parecer o mais branco da barra. */
+        if (!sensorEnabled[i]) {
+            sensorValues[i] = 1000;
+            continue;
+        }
+
         const uint16_t minimum = calibrationMin[i];
         const uint16_t maximum = calibrationMax[i];
 
         if (maximum <= minimum) {
-            sensorValues[i] = 0;
+            sensorValues[i] = 1000;
             continue;
         }
 
@@ -112,6 +132,8 @@ uint16_t FrontSensor::readLineWhite() {
     uint32_t sum = 0;
 
     for (uint8_t i = 0; i < numberOfSensors; i++) {
+        if (!sensorEnabled[i]) continue;
+
         /* Linha branca em fundo preto: o sensor sobre a linha lê MENOS. */
         const uint16_t value = 1000 - sensorValues[i];
 
@@ -123,13 +145,21 @@ uint16_t FrontSensor::readLineWhite() {
         }
     }
 
+    const uint16_t middle = (numberOfSensors - 1) * 1000 / 2;
+
     if (!onLine) {
-        /* Linha perdida: trava no extremo por onde ela saiu, senão o robô
-         * "esquece" a curva e sai reto. */
-        const uint16_t middle = (numberOfSensors - 1) * 1000 / 2;
+        /* Nunca viu a linha (robô parado na bancada, barra fora da pista):
+         * devolve o centro, para o PID não pedir uma curva fechada do nada.
+         * lastLinePosition começa no meio, e "meio < meio" é falso — sem esta
+         * guarda o primeiro readLineWhite() já apontaria para o extremo. */
+        if (!lineEverSeen) return middle;
+
+        /* Linha perdida depois de vista: trava no extremo por onde ela saiu,
+         * senão o robô "esquece" a curva e sai reto. */
         return lastLinePosition < middle ? 0 : (numberOfSensors - 1) * 1000;
     }
 
+    lineEverSeen = true;
     lastLinePosition = weightedSum / sum;
     return lastLinePosition;
 }
@@ -140,4 +170,22 @@ uint8_t FrontSensor::getNumberOfSensors() const {
 
 bool FrontSensor::isCalibrated() const {
     return calibrated;
+}
+
+bool FrontSensor::isSensorEnabled(const uint8_t index) const {
+    if (index >= numberOfSensors) return false;
+    return sensorEnabled[index];
+}
+
+void FrontSensor::setSensorEnabled(const uint8_t index, const bool enabled) {
+    if (index >= numberOfSensors) return;
+    sensorEnabled[index] = enabled;
+}
+
+uint8_t FrontSensor::getEnabledCount() const {
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < numberOfSensors; i++) {
+        if (sensorEnabled[i]) count++;
+    }
+    return count;
 }

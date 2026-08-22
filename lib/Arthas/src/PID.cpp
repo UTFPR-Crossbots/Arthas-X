@@ -1,7 +1,15 @@
 #include <PID.h>
+#include <Arduino.h>
+#include <math.h>
+
+namespace {
+    /* Anti-windup: o erro normalizado vale no máximo 1, então este limite
+     * equivale a ~1 segundo de erro cheio acumulado. */
+    const double integralLimit = 1.0;
+}
 
 PIDController::PIDController(const uint8_t numberOfSensors):
-    Kp(1),
+    Kp(50),     // erro normalizado: Kp na ordem do maxspeed é o ponto de partida
     Ki(0),
     Kd(0),
     setPoint((numberOfSensors - 1) * 500),   //This is the middle of the sensors, if it was 10 sensors it would be 9500, because its from 0 to 9
@@ -25,63 +33,46 @@ void PIDController::updatePIDConstants(const double Kp, const double Ki, const d
     this->Kd = Kd;
 }
 
-// double PIDController::calculateCorrection(uint16_t linePosition) {
-//     double currentCorrection;
-
-//     unsigned long currentTime = millis();
-//     unsigned long deltaTime = currentTime - this->lastTime;
-
-//     this->error = this->setPoint - linePosition;
-
-//     double derivativeTerm = (this->error - this->lastError) / static_cast<double>(deltaTime);
-
-
-//     currentCorrection = this->Kp * this->error + this->Kd * derivativeTerm;
-
-
-//     this->lastError = this->setPoint - linePosition;
-//     this->lastTime = currentTime;
-
-//     return currentCorrection;
-// }
-
 double PIDController::calculateCorrection(uint16_t linePosition) {
-    unsigned long currentTime = millis();
-    // verifica se é a primeira execução
-    double deltaTime = (currentTime - lastTime) / 1000.0; // Convert to seconds
-    
-    if (deltaTime == 0) {
-        deltaTime = 0.001;
-    }
+    const unsigned long currentTime = millis();
 
-    double error = setPoint - linePosition;
+    double error = setPoint - (double)linePosition;
 
-    if (abs(error) < deadZone) {
+    if (fabs(error) < deadZone) {
         error = 0;
         integral = 0;
     }
-    
-    // Proportional term
-    double proportionalTerm = Kp * error;
-    
-    // Integral term
-    integral += error * deltaTime;
-    double integralTerm = Ki * integral;
-    
-    // Derivative term (avoid on first cycle)
-    double derivativeTerm = 0;
-    if (lastTime != 0) {
-        derivativeTerm = Kd * (error - lastError) / deltaTime;
+
+    /* Normaliza para -1..+1. O setPoint é o meio da barra, logo o erro máximo
+     * possível é o próprio setPoint. */
+    error /= setPoint;
+
+    /* Primeiro ciclo: sem lastTime válido, deltaTime seria o tempo desde o
+     * boot. Integrar isso estouraria a integral logo de cara, e a derivada
+     * daria um pico do nada. */
+    if (lastTime == 0) {
+        lastError = error;
+        lastTime = currentTime;
+        return Kp * error;
     }
 
-    // Calculate total correction
-    double correction = proportionalTerm + integralTerm + derivativeTerm;
+    double deltaTime = (currentTime - lastTime) / 1000.0; // Convert to seconds
+    if (deltaTime <= 0) {
+        deltaTime = 0.001;
+    }
 
-    // Update states
+    const double proportionalTerm = Kp * error;
+
+    integral += error * deltaTime;
+    integral = constrain(integral, -integralLimit, integralLimit);
+    const double integralTerm = Ki * integral;
+
+    const double derivativeTerm = Kd * (error - lastError) / deltaTime;
+
     lastError = error;
     lastTime = currentTime;
 
-    return correction;
+    return proportionalTerm + integralTerm + derivativeTerm;
 }
 
 const double PIDController::getP() {
@@ -94,4 +85,8 @@ const double PIDController::getI() {
 
 const double PIDController::getD() {
     return Kd;
+}
+
+double PIDController::getSetPoint() const {
+    return setPoint;
 }

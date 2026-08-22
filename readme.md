@@ -69,8 +69,9 @@ Valem nos dois canais.
 | `i` | Stream dos 14 sensores crus do ADC (0–4095) |
 | `h` | Stream dos 14 sensores calibrados (0–1000) + posição da linha |
 | `g` | Posição da linha, uma leitura |
-| `a` | Calibrar a barra frontal (7 s) |
+| `a` | Calibrar a barra frontal (7 s) — também detecta sensores mortos |
 | `d` | Stream dos dois sensores laterais |
+| `off <n>` / `on <n>` | Tirar/devolver um sensor da barra à conta da linha |
 | **Motores** (robô suspenso!) | |
 | `j` / `k` | Testar motor esquerdo / direito |
 | `f` | Testar os dois motores |
@@ -79,15 +80,50 @@ Valem nos dois canais.
 | `e` | `chase` — segue a linha até receber `c` |
 | `b` | `driveLap` — volta com contagem de marcas |
 | **Constantes** | |
-| `kp <valor>` | ex: `kp 0.35` |
+| `kp <valor>` | ex: `kp 50` — ver escala do PID abaixo |
 | `ki <valor>` / `kd <valor>` | |
 | `vel <0-255>` | Velocidade máxima |
 | `marcas <n>` | Marcas para fechar a volta |
+| `rev <0-100>` | Quanto a roda interna pode ir de ré, em % do `maxspeed` (padrão 50) |
 
 Os comandos com valor (`kp`, `vel`, ...) existem porque o pacote de texto de 29 caracteres do app é
 inviável de digitar à mão. Esse pacote continua funcionando, para o app não quebrar.
 
 ---
+
+## PID: o erro é normalizado
+
+O erro entra no PID **normalizado para −1..+1**, não em unidades de posição.
+
+Com 14 sensores a posição vai de 0 a 13000, então o erro cru chega a ±6500. Nessa escala qualquer
+`Kp` acima de ~0,015 satura a correção e o robô vira bang-bang, com uma roda no máximo e a outra em
+ré. Normalizado, **`Kp` é lido em unidades de velocidade por deflexão cheia**: `Kp` igual ao
+`maxspeed` dá a diferença máxima entre as rodas no extremo da barra. Comece com `Kp` na ordem do
+`maxspeed` (padrão 50) e Kd = 0.
+
+**Constantes tunadas na escala antiga não valem mais.**
+
+A roda interna pode entrar em ré para fechar curva fechada — é o `constrain(..., -maxspeed/2, ...)`
+de antes, agora centralizado em `Arthas::applyCorrection()` e ajustável por `rev <0-100>`.
+`rev 0` trava as rodas em só para frente.
+
+---
+
+## Sensor morto na barra
+
+Um canal queimado ou desconectado calibra com faixa nula. Sem tratamento ele sai como 0 no
+`readCalibrated()`, e o `1000 - valor` do `readLineWhite()` o transforma no **ponto mais branco da
+barra** — um sensor morto sozinho passa a mandar na posição da linha e joga o robô para o lado dele.
+
+Por isso a calibração (`a`) marca como desabilitado todo sensor cuja faixa branco–preto fique abaixo
+de `minimumCalibrationRange` (100 contagens de ADC). Sensor desabilitado:
+
+- sai da média ponderada da posição;
+- é reportado como 1000 (preto / "não vejo linha"), que é o valor seguro;
+- aparece como `x` no teste `h` e é listado após a calibração e no `s`.
+
+`off <n>` e `on <n>` forçam na mão, para o caso de um sensor intermitente passar pela detecção
+automática. Recalibrar refaz a detecção e sobrescreve o que foi forçado.
 
 ## Hardware — o que mudou em relação à placa antiga
 

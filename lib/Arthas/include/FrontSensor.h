@@ -12,6 +12,11 @@
  *
  * Polaridade: com pull-up de 10 kOhm, mais reflexão (branco) = tensão MENOR,
  * igual ao QTR analógico — daí readLineWhite() inverter os valores.
+ *
+ * Sensor morto: um canal que não varia na calibração é DESABILITADO e sai da
+ * conta da posição. Sem isso ele calibra com faixa nula, sai como 0, e o
+ * 1000-0 de readLineWhite() o transforma no ponto mais branco da barra —
+ * um sensor queimado sozinho passa a mandar na posição da linha.
  */
 class FrontSensor {
     private:
@@ -23,8 +28,10 @@ class FrontSensor {
 
         uint16_t calibrationMin[maxSensors];
         uint16_t calibrationMax[maxSensors];
+        bool sensorEnabled[maxSensors];
         bool calibrated;
         uint16_t lastLinePosition;
+        bool lineEverSeen;
 
         void selectChannel(const uint8_t channel);
 
@@ -40,4 +47,10 @@ class FrontSensor {
 
         uint8_t getNumberOfSensors() const;
         bool isCalibrated() const;
+
+        /* Um sensor desabilitado não entra na média ponderada e é reportado
+         * como 1000 (preto / sem linha), que é o valor seguro. */
+        bool isSensorEnabled(const uint8_t index) const;
+        void setSensorEnabled(const uint8_t index, const bool enabled);
+        uint8_t getEnabledCount() const;
 };

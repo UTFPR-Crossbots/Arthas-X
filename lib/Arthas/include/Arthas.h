@@ -37,9 +37,17 @@ class Arthas {
         double tempo;
         uint8_t marcas;
 
+        /* Fração do maxspeed que a roda interna pode girar em RÉ para fechar
+         * curva. 0 trava as rodas em só para frente. Ajustável por "rev <%>". */
+        double reverseRatio;
+
         /* Comandos "kp 0.35", "vel 120" etc., pensados para digitar na serial.
          * Devolve true se a linha era um desses e já foi aplicada. */
         bool parseValueCommand(const String& input);
+
+        /* Único ponto onde a correção do PID vira velocidade de roda — inclusive
+         * a decisão de deixar (ou não) a roda interna entrar em ré. */
+        void applyCorrection(const int16_t baseSpeed, const double correction);
 
     public:
         /* leftMotorPins/rightMotorPins = {direção, pwm} (DRV8874 em PH/EN).
@@ -91,6 +99,7 @@ class Arthas {
         /* Constants */
         void printMenu();
         void printStatus();
+        void reportDisabledSensors();
         void printMaxSpeed();
         void printPID();
 

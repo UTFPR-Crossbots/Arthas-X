@@ -24,7 +24,8 @@ Arthas::Arthas(const uint8_t* leftMotorPins,
 	pid(numberOfFrontSensors),
 	maxspeed(maxspeed),
 	tempo(0),
-	marcas(0)
+	marcas(0),
+	reverseRatio(0.5)
 {}
 
 Arthas::~Arthas() {
@@ -72,8 +73,36 @@ bool Arthas::parseValueCommand(const String& input) {
 		marcas = (uint8_t)input.substring(7).toInt();
 		return true;
 	}
+	if (input.startsWith("rev ")) {
+		reverseRatio = constrain(input.substring(4).toInt(), 0, 100) / 100.0;
+		return true;
+	}
+	if (input.startsWith("off ")) {
+		const uint8_t index = (uint8_t)input.substring(4).toInt();
+		frontSensor.setSensorEnabled(index, false);
+		console.print("Sensor ");
+		console.print((int)index);
+		console.println(" desabilitado.");
+		return true;
+	}
+	if (input.startsWith("on ")) {
+		const uint8_t index = (uint8_t)input.substring(3).toInt();
+		frontSensor.setSensorEnabled(index, true);
+		console.print("Sensor ");
+		console.print((int)index);
+		console.println(" habilitado.");
+		return true;
+	}
 
 	return false;
+}
+
+void Arthas::applyCorrection(const int16_t baseSpeed, const double correction) {
+	const int16_t minSpeed = -(int16_t)(maxspeed * reverseRatio);
+
+	powertrain.motorsDrive(
+		constrain(baseSpeed + correction, minSpeed, maxspeed),
+		constrain(baseSpeed - correction, minSpeed, maxspeed));
 }
 
 ArthasAction Arthas::parseInput() {
@@ -193,6 +222,7 @@ void Arthas::calibrateFrontSensor() {
 	console.println("Passe a barra sobre a linha e o fundo por 7 s...");
 	frontSensor.calibrate();
 	console.println("//---Calibration finished---//");
+	reportDisabledSensors();
 }
 
 const uint16_t Arthas::readLineWhiteFrontSensor() {
@@ -214,7 +244,9 @@ void Arthas::testFrontSensor() {
 		if (millis() - lastPrint > 300) {
 			frontSensor.readCalibrated(sensorValues);
 			for(uint8_t i = 0; i < numberOfSensors; i++) {
-				console.print(sensorValues[i]);
+				/* Desabilitado aparece como x: ele nao entra na posicao. */
+				if (frontSensor.isSensorEnabled(i)) console.print(sensorValues[i]);
+				else console.print("x");
 				console.print("|");
 			}
 			console.print(" pos=");
@@ -314,6 +346,7 @@ void Arthas::printMenu() {
 	console.println("  g   barra frontal - posicao (1 leitura)");
 	console.println("  a   calibrar a barra frontal (7 s)");
 	console.println("  d   sensores laterais (esq + dir)");
+	console.println("  off <n> / on <n>   ignorar/voltar um sensor da barra");
 	console.println();
 	console.println(" MOTORES  (robo suspenso!)");
 	console.println("  j   testar motor esquerdo");
@@ -326,15 +359,40 @@ void Arthas::printMenu() {
 	console.println("  b   volta - com contagem de marcas");
 	console.println();
 	console.println(" CONSTANTES");
-	console.println("  kp <valor>       ex: kp 0.35");
+	console.println("  kp <valor>       ex: kp 50   (erro normalizado -1..1)");
 	console.println("  ki <valor>");
 	console.println("  kd <valor>");
 	console.println("  vel <0-255>      velocidade maxima");
 	console.println("  marcas <n>       marcas para fechar a volta");
+	console.println("  rev <0-100>      re da roda interna, % do maxspeed");
 	console.println("  s                mostrar estado atual");
 	console.println();
 	console.println("  ?   mostrar este menu");
 	console.println("========================================");
+}
+
+void Arthas::reportDisabledSensors() {
+	const uint8_t numberOfSensors = frontSensor.getNumberOfSensors();
+	bool anyDisabled = false;
+
+	for (uint8_t i = 0; i < numberOfSensors; i++) {
+		if (frontSensor.isSensorEnabled(i)) continue;
+
+		if (!anyDisabled) {
+			console.print("Sensores DESABILITADOS (fora da conta da linha): ");
+			anyDisabled = true;
+		} else {
+			console.print(", ");
+		}
+		console.print((int)i);
+	}
+
+	if (anyDisabled) {
+		console.print(" | ativos: ");
+		console.print((int)frontSensor.getEnabledCount());
+		console.print("/");
+		console.println((int)numberOfSensors);
+	}
 }
 
 void Arthas::printStatus() {
@@ -345,6 +403,10 @@ void Arthas::printStatus() {
 	console.println((int)marcas);
 	console.print("barra calibrada: ");
 	console.println(frontSensor.isCalibrated() ? "sim" : "nao");
+	reportDisabledSensors();
+	console.print("re da roda interna: ");
+	console.print((int)(reverseRatio * 100));
+	console.println("% do maxspeed");
 	console.print("BLE conectado: ");
 	console.println(console.isBluetoothConnected() ? "sim" : "nao");
 }
@@ -355,6 +417,7 @@ void Arthas::printMaxSpeed() {
 }
 
 void Arthas::printPID() {
+	console.println("PID sobre erro normalizado (-1..+1); Kp na ordem do maxspeed.");
 	console.print("P: ");
 	console.printDoubleln(pid.getP());
 	console.print("I: ");
@@ -391,10 +454,7 @@ void Arthas::driveLap(const uint8_t markers) {
 
 		double correction = pid.calculateCorrection(linePosition);
 
-		int16_t leftMotorSpeed = constrain(speed + correction, -maxspeed/2, maxspeed);
-		int16_t rightMotorSpeed = constrain(speed - correction, -maxspeed/2, maxspeed);
-
-		powertrain.motorsDrive(leftMotorSpeed, rightMotorSpeed);
+		applyCorrection(speed, correction);
 
 		/* Marcas contadas pelo lateral esquerdo: é o analógico, com limiar
 		 * ajustável. O direito está num pino sem ADC e só tem limiar fixo. */
@@ -429,8 +489,7 @@ void Arthas::chase() {
 
 		double correction = pid.calculateCorrection(linePosition);
 
-		powertrain.leftMotorDrive(constrain(maxspeed + correction, -maxspeed/2, maxspeed));
-		powertrain.rightMotorDrive(constrain(maxspeed - correction, -maxspeed/2, maxspeed));
+		applyCorrection(maxspeed, correction);
 
 		if (action == ArthasAction::Stop) {
 			stopMotors();
