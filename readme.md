@@ -103,6 +103,20 @@ ré. Normalizado, **`Kp` é lido em unidades de velocidade por deflexão cheia**
 
 **Constantes tunadas na escala antiga não valem mais.**
 
+### Convenção de sinais
+
+Valor alto = preto, valor baixo = branco, e `readLineWhite()` devolve o centróide do branco.
+Com o **sensor 0 na esquerda** da barra:
+
+| Linha | `pos` | `erro = setPoint - pos` | Rodas | Robô |
+|---|---|---|---|---|
+| Esquerda | baixo | positivo | esquerda desacelera, direita acelera | vira à **esquerda** |
+| Centrada | 6500 | 0 | iguais | reto |
+| Direita | alto | negativo | esquerda acelera, direita desacelera | vira à **direita** |
+
+Ou seja, correção positiva **subtrai da esquerda e soma na direita**. Se um dia a barra for montada
+espelhada (canal 0 do mux na direita), a linha a trocar é a do `Arthas::applyCorrection()`.
+
 A roda interna pode entrar em ré para fechar curva fechada — é o `constrain(..., -maxspeed/2, ...)`
 de antes, agora centralizado em `Arthas::applyCorrection()` e ajustável por `rev <0-100>`.
 `rev 0` trava as rodas em só para frente.

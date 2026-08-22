@@ -100,9 +100,21 @@ bool Arthas::parseValueCommand(const String& input) {
 void Arthas::applyCorrection(const int16_t baseSpeed, const double correction) {
 	const int16_t minSpeed = -(int16_t)(maxspeed * reverseRatio);
 
+	/* Convenção de sinais, derivada do sensor 0 estar na ESQUERDA da barra:
+	 *
+	 *   valor alto = preto, valor baixo = branco, e readLineWhite() devolve o
+	 *   centroide do branco. Linha à esquerda => posicao baixa => o erro
+	 *   (setPoint - posicao) fica POSITIVO.
+	 *
+	 *   Para virar à esquerda num diferencial, a roda de DENTRO (esquerda)
+	 *   desacelera e a de FORA (direita) acelera. Logo correção positiva tem
+	 *   de SUBTRAIR da esquerda e SOMAR na direita.
+	 *
+	 * Se algum dia a barra for montada espelhada (canal 0 do mux na direita),
+	 * é esta a linha para trocar. */
 	powertrain.motorsDrive(
-		constrain(baseSpeed + correction, minSpeed, maxspeed),
-		constrain(baseSpeed - correction, minSpeed, maxspeed));
+		constrain(baseSpeed - correction, minSpeed, maxspeed),
+		constrain(baseSpeed + correction, minSpeed, maxspeed));
 }
 
 ArthasAction Arthas::parseInput() {
