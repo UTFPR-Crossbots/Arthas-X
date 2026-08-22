@@ -1,86 +1,161 @@
 #include <Arthas.h>
 
-Arthas::Arthas(const uint8_t* leftMotorPins, const uint8_t* rightMotorPins, const uint8_t* frontSensorPins, uint8_t numberOfPins, const uint8_t lateralSensorPin, const int16_t maxspeed):
-	bluetooth(),
-	powertrain(leftMotorPins, rightMotorPins),
-	frontSensor(numberOfPins, frontSensorPins, true),
-	lateralSensor(lateralSensorPin, false),
-	pid(numberOfPins),
+namespace {
+	/* Formato do pacote de constantes vindo do app: os índices abaixo vão até
+	 * 29, então qualquer coisa mais curta é fragmento de BLE, não pacote. */
+	const uint16_t constantsPacketLength = 29;
+}
+
+Arthas::Arthas(const uint8_t* leftMotorPins,
+               const uint8_t* rightMotorPins,
+               const uint8_t frontSensorCommonPin,
+               const uint8_t* frontSensorSelectPins,
+               const uint8_t numberOfFrontSensors,
+               const uint8_t leftLateralSensorPin,
+               const uint8_t rightLateralSensorPin,
+               const int16_t maxspeed,
+               const bool invertLeftMotor,
+               const bool invertRightMotor):
+	console(),
+	powertrain(leftMotorPins, rightMotorPins, invertLeftMotor, invertRightMotor),
+	frontSensor(frontSensorCommonPin, frontSensorSelectPins, numberOfFrontSensors),
+	lateralSensorLeft(leftLateralSensorPin, true),
+	lateralSensorRight(rightLateralSensorPin, false),
+	pid(numberOfFrontSensors),
 	maxspeed(maxspeed),
 	tempo(0),
 	marcas(0)
-{
-	for (uint8_t i = 0; i < numberOfPins; i++) {
-		this->frontSensorPins[i] = frontSensorPins[i];
-	}
-}
+{}
 
 Arthas::~Arthas() {
 }
 
-/* Bluetooth */
+/* Comunicação */
+Console* Arthas::getConsole() {
+	return &console;
+}
+
 Bluetooth* Arthas::getBluetooth() {
-	return &bluetooth;
+	return console.getBluetooth();
 }
 
-void Arthas::setupBluetooth() {
-	bluetooth.setup();
+void Arthas::setupConsole() {
+	console.setup();
 }
 
-const bool Arthas::isBluetoothAvailable() {
-	return bluetooth.isAvailable();
+const bool Arthas::isInputAvailable() {
+	return console.isAvailable();
 }
 
-String Arthas::readBluetoothInput() {
-	return bluetooth.readSerialInput();
+String Arthas::readInput() {
+	return console.readInput();
 }
 
-ArthasAction Arthas::parseBluetoothInput() {
-	if (!isBluetoothAvailable()) return ArthasAction::None;
+bool Arthas::parseValueCommand(const String& input) {
+	if (input.startsWith("kp ")) {
+		pid.updatePIDConstants(input.substring(3).toDouble(), pid.getI(), pid.getD());
+		return true;
+	}
+	if (input.startsWith("ki ")) {
+		pid.updatePIDConstants(pid.getP(), input.substring(3).toDouble(), pid.getD());
+		return true;
+	}
+	if (input.startsWith("kd ")) {
+		pid.updatePIDConstants(pid.getP(), pid.getI(), input.substring(3).toDouble());
+		return true;
+	}
+	if (input.startsWith("vel ")) {
+		maxspeed = constrain(input.substring(4).toInt(), 0, MotorArthas::maxDutyCycle);
+		return true;
+	}
+	if (input.startsWith("marcas ")) {
+		marcas = (uint8_t)input.substring(7).toInt();
+		return true;
+	}
 
-	String serialInput = readBluetoothInput();
+	return false;
+}
 
-	bluetooth.println(serialInput);
+ArthasAction Arthas::parseInput() {
+	if (!isInputAvailable()) return ArthasAction::None;
 
-	if (serialInput == "a") {
+	String input = readInput();
+	input.trim();
+
+	if (input.length() == 0) return ArthasAction::None;
+
+	if (input == "a") {
 		return ArthasAction::Calibrate;
 	}
-	else if (serialInput == "b") {
+	else if (input == "b") {
 		return ArthasAction::DriveLap;
 	}
-	else if (serialInput == "c") {
+	else if (input == "c") {
 		return ArthasAction::Stop;
 	}
-	else if (serialInput == "e") {
+	else if (input == "d") {
+		return ArthasAction::LateralSensorTest;
+	}
+	else if (input == "e") {
 		return ArthasAction::Chase;
 	}
-	else if (serialInput == "f") {
+	else if (input == "f") {
 		return ArthasAction::BothMotorsTest;
 	}
-	else if (serialInput == "g") {
+	else if (input == "g") {
 		return ArthasAction::FrontSensorTestWhileLine;
 	}
-	else if(serialInput == "Cliente Conectado!"){
+	else if (input == "h") {
+		return ArthasAction::FrontSensorTest;
+	}
+	else if (input == "i") {
+		return ArthasAction::FrontSensorTestAnalogRead;
+	}
+	else if (input == "j") {
+		return ArthasAction::LeftMotorTest;
+	}
+	else if (input == "k") {
+		return ArthasAction::RightMotorTest;
+	}
+	else if (input == "s") {
+		return ArthasAction::ShowStatus;
+	}
+	else if (input == "?" || input == "m") {
+		return ArthasAction::ShowMenu;
+	}
+	else if(input == "Cliente Conectado!"){
 		return ArthasAction::BluetoothConnected;
 	}
-	else if (serialInput ==  "Cliente Desconectado!") {
+	else if (input ==  "Cliente Desconectado!") {
 		return ArthasAction::BluetoothDisconnected;
+	}
+	/* Comandos com valor ("kp 0.35", "vel 120"), pensados para a serial. */
+	else if (parseValueCommand(input)) {
+		return ArthasAction::UpdateConstants;
 	}
 	// This code is ugly, it should not do the functions calls here but the input from the app is trash so this is the best way
 	// TODO: Change the app to a better way of sending PIDs Constants
 	else {
-		String rawKp = serialInput.substring(2,9);
+		/* Sem esta guarda, um fragmento de BLE cairia aqui e sobrescreveria
+		 * Kp/Kd com lixo sem ninguém perceber. O SPP não tinha esse problema
+		 * porque readString() esperava o pacote inteiro. */
+		if (input.length() < constantsPacketLength) {
+			console.println("Comando desconhecido: '" + input + "'. Digite ? para o menu.");
+			return ArthasAction::None;
+		}
+
+		String rawKp = input.substring(2,9);
 		double kP = rawKp.toDouble();
 
-		String rawKi = serialInput.substring(10,17);
+		String rawKi = input.substring(10,17);
 		marcas = (uint8_t)rawKi.toInt();
 
-		String rawKd = serialInput.substring(18,25);
+		String rawKd = input.substring(18,25);
 		double kD = rawKd.toDouble();
 
 		pid.updatePIDConstants(kP, 0, kD);
 
-		String rawSpeed = serialInput.substring(26,29);
+		String rawSpeed = input.substring(26,29);
 		uint8_t speed = (uint8_t)rawSpeed.toInt();
 		maxspeed = speed;
 
@@ -88,24 +163,24 @@ ArthasAction Arthas::parseBluetoothInput() {
 	}
 }
 
-void Arthas::printBT(const String msg) {
-	bluetooth.print(msg);
+void Arthas::print(const String msg) {
+	console.print(msg);
 }
 
-void Arthas::printBT(const int msg) {
-	bluetooth.print(msg);
+void Arthas::print(const int msg) {
+	console.print(msg);
 }
 
-void Arthas::printlnBT(const String msg) {
-	bluetooth.println(msg);
+void Arthas::println(const String msg) {
+	console.println(msg);
 }
 
-void Arthas::printlnBT(const int msg) {
-	bluetooth.println(msg);
+void Arthas::println(const int msg) {
+	console.println(msg);
 }
 
 void Arthas::turnOffBluetooth() {
-	bluetooth.turnOff();
+	console.turnOffBluetooth();
 }
 
 /* Line Sensor */
@@ -114,9 +189,10 @@ void Arthas::setupFrontSensor() {
 }
 
 void Arthas::calibrateFrontSensor() {
-	bluetooth.print("//---Calibration started---//");
+	console.println("//---Calibration started---//");
+	console.println("Passe a barra sobre a linha e o fundo por 7 s...");
 	frontSensor.calibrate();
-	bluetooth.print("//---Calibration finished---//");
+	console.println("//---Calibration finished---//");
 }
 
 const uint16_t Arthas::readLineWhiteFrontSensor() {
@@ -127,14 +203,22 @@ void Arthas::testFrontSensor() {
 	const uint8_t numberOfSensors = frontSensor.getNumberOfSensors();
 	uint16_t sensorValues[numberOfSensors];
 	unsigned long lastPrint = 0;
-	while(true) {
-		if (millis() - lastPrint > 1000) {
+
+	if (!frontSensor.isCalibrated()) {
+		console.println("AVISO: barra ainda nao calibrada (comando 'a').");
+	}
+	console.println("Calibrado (0-1000) | posicao. 'c' para parar.");
+
+	/* Sai no comando de parada — sem isso o bring-up trava aqui para sempre. */
+	while (parseInput() != ArthasAction::Stop) {
+		if (millis() - lastPrint > 300) {
 			frontSensor.readCalibrated(sensorValues);
 			for(uint8_t i = 0; i < numberOfSensors; i++) {
-				bluetooth.print(sensorValues[i]);
-				bluetooth.print("|");
+				console.print(sensorValues[i]);
+				console.print("|");
 			}
-			bluetooth.println();
+			console.print(" pos=");
+			console.println(frontSensor.readLineWhite());
 			lastPrint = millis();
 		}
 	}
@@ -144,79 +228,147 @@ void Arthas::testFrontSensorAnalogRead() {
 	const uint8_t numberOfSensors = frontSensor.getNumberOfSensors();
 	uint16_t sensorValues[numberOfSensors];
 	unsigned long lastPrint = 0;
-	unsigned long currentTime = 0;
-	while(true) {
-		currentTime = millis();
-		if (currentTime - lastPrint > 1000) {
+
+	console.println("Cru do ADC (0-4095). Branco = valor MENOR. 'c' para parar.");
+
+	while (parseInput() != ArthasAction::Stop) {
+		if (millis() - lastPrint > 300) {
+			/* Passa pelo mux: não existe mais um GPIO por sensor. */
+			frontSensor.readRaw(sensorValues);
 			for(uint8_t i = 0; i < numberOfSensors; i++) {
-				bluetooth.print(analogRead(frontSensorPins[i]));
-				bluetooth.print("|");
+				console.print(sensorValues[i]);
+				console.print("|");
 			}
-			bluetooth.println();
-			lastPrint = currentTime;
+			console.println();
+			lastPrint = millis();
 		}
 	}
 }
 
 void Arthas::testFrontSensorWhiteLine() {
 	uint16_t whiteLineValue = frontSensor.readLineWhite();
-	bluetooth.print("White Line Value: ");
-	bluetooth.println(whiteLineValue);
+	console.print("White Line Value: ");
+	console.println(whiteLineValue);
 }
 
-/* Lateral Sensor */
-void Arthas::setupLateralSensor() {
-	lateralSensor.setup();
+/* Lateral Sensors */
+void Arthas::setupLateralSensors() {
+	lateralSensorLeft.setup();
+	lateralSensorRight.setup();
 }
 
 void Arthas::testLateralSensor() {
-	bluetooth.print("Leitura: ");
-	bluetooth.println(lateralSensor.read());
+	unsigned long lastPrint = 0;
+
+	console.println("Laterais: esq analogico (0-4095), dir digital. 'c' para parar.");
+
+	while (parseInput() != ArthasAction::Stop) {
+		if (millis() - lastPrint > 300) {
+			console.print("Esq: ");
+			console.print((int)lateralSensorLeft.read());
+			console.print(lateralSensorLeft.isWhite() ? " [BRANCO] " : " [PRETO]  ");
+			console.print("| Dir: ");
+			console.print((int)lateralSensorRight.read());
+			console.println(lateralSensorRight.isWhite() ? " [BRANCO]" : " [PRETO]");
+			lastPrint = millis();
+		}
+	}
 }
 
 /* Motors */
+void Arthas::setupMotors() {
+	powertrain.setup();
+}
+
 void Arthas::stopMotors() {
-	powertrain.leftMotorDrive(0);
-	powertrain.rightMotorDrive(0);
+	powertrain.stopMotors();
 }
 
 void Arthas::testLeftMotor() {
+	console.print("Motor esquerdo a ");
+	console.println(maxspeed);
 	powertrain.leftMotorDrive(maxspeed);
 }
 
 void Arthas::testRightMotor() {
-    powertrain.rightMotorDrive(maxspeed);
+	console.print("Motor direito a ");
+	console.println(maxspeed);
+	powertrain.rightMotorDrive(maxspeed);
 }
 
 void Arthas::testBothMotors() {
-	bluetooth.println("Testing both motors!");
-	bluetooth.println("Testing left motor!");
-    testLeftMotor();
-	bluetooth.println("Testing right motor!");
-    testRightMotor();
+	console.println("Testando os dois motores! 'c' para parar.");
+	testLeftMotor();
+	testRightMotor();
 }
 
 /* Constants */
+void Arthas::printMenu() {
+	console.println();
+	console.println("========================================");
+	console.println("   ARTHAS - menu de testes");
+	console.println("========================================");
+	console.println(" SENSORES");
+	console.println("  i   barra frontal - cru do ADC (0-4095)");
+	console.println("  h   barra frontal - calibrado (0-1000)");
+	console.println("  g   barra frontal - posicao (1 leitura)");
+	console.println("  a   calibrar a barra frontal (7 s)");
+	console.println("  d   sensores laterais (esq + dir)");
+	console.println();
+	console.println(" MOTORES  (robo suspenso!)");
+	console.println("  j   testar motor esquerdo");
+	console.println("  k   testar motor direito");
+	console.println("  f   testar os dois motores");
+	console.println("  c   PARAR (sai dos testes continuos)");
+	console.println();
+	console.println(" MODOS");
+	console.println("  e   chase - segue a linha ate receber 'c'");
+	console.println("  b   volta - com contagem de marcas");
+	console.println();
+	console.println(" CONSTANTES");
+	console.println("  kp <valor>       ex: kp 0.35");
+	console.println("  ki <valor>");
+	console.println("  kd <valor>");
+	console.println("  vel <0-255>      velocidade maxima");
+	console.println("  marcas <n>       marcas para fechar a volta");
+	console.println("  s                mostrar estado atual");
+	console.println();
+	console.println("  ?   mostrar este menu");
+	console.println("========================================");
+}
+
+void Arthas::printStatus() {
+	console.println("--- Estado ---");
+	printPID();
+	printMaxSpeed();
+	console.print("marcas: ");
+	console.println((int)marcas);
+	console.print("barra calibrada: ");
+	console.println(frontSensor.isCalibrated() ? "sim" : "nao");
+	console.print("BLE conectado: ");
+	console.println(console.isBluetoothConnected() ? "sim" : "nao");
+}
+
 void Arthas::printMaxSpeed() {
-	bluetooth.print("maxSpeed: ");
-	bluetooth.println(maxspeed);
+	console.print("maxSpeed: ");
+	console.println(maxspeed);
 }
 
 void Arthas::printPID() {
-	bluetooth.print("P: ");
-	bluetooth.printDoubleln(pid.getP());
-	bluetooth.print("I: ");
-	bluetooth.printDoubleln(pid.getI());
-	bluetooth.print("D: ");
-	bluetooth.printDoubleln(pid.getD());
+	console.print("P: ");
+	console.printDoubleln(pid.getP());
+	console.print("I: ");
+	console.printDoubleln(pid.getI());
+	console.print("D: ");
+	console.printDoubleln(pid.getD());
 }
 
 /* Modes */
 void Arthas::driveLap(const uint8_t markers) {
-	printlnBT("//---Começando primeira volta---//");
-	// printlnBT("//---Turning off the bluetooth---//");
+	println("//---Comecando primeira volta---//");
+	// println("//---Turning off the bluetooth---//");
 	// turnOffBluetooth();
-	
+
 	bool lapFinishedFlag = false;
 	bool isNewMarker = true;
 	uint8_t markerCount = 0;
@@ -244,11 +396,12 @@ void Arthas::driveLap(const uint8_t markers) {
 
 		powertrain.motorsDrive(leftMotorSpeed, rightMotorSpeed);
 
-		//Case lateral sensor is analog read
-		if (lateralSensor.isWhite()) {
+		/* Marcas contadas pelo lateral esquerdo: é o analógico, com limiar
+		 * ajustável. O direito está num pino sem ADC e só tem limiar fixo. */
+		if (lateralSensorLeft.isWhite()) {
 			if (isNewMarker) {
 				markerCount++;
-				bluetooth.println(markerCount);
+				console.println(markerCount);
 				isNewMarker = false;
 			}
 		} else {
@@ -267,11 +420,11 @@ void Arthas::driveLap(const uint8_t markers) {
 }
 
 void Arthas::chase() {
-	bluetooth.println("--- Starting! ---");
+	console.println("--- Starting! ---");
 	bool stop = false;
 
 	while (!stop) {
-		ArthasAction action = parseBluetoothInput();
+		ArthasAction action = parseInput();
 		uint16_t linePosition = frontSensor.readLineWhite();
 
 		double correction = pid.calculateCorrection(linePosition);
@@ -282,12 +435,12 @@ void Arthas::chase() {
 		if (action == ArthasAction::Stop) {
 			stopMotors();
 			stop = true;
-		} 
+		}
 		else if (action == ArthasAction::UpdateConstants) {
-			bluetooth.println("Updated Constants!");
+			console.println("Updated Constants!");
 			this->printPID();
 		}
 	}
 
-	bluetooth.println("--- Stopped! ---");
+	console.println("--- Stopped! ---");
 }

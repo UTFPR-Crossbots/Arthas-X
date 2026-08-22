@@ -1,39 +1,44 @@
 #include <Arduino.h>
 #include <Arthas.h>
-#include <BluetoothSerial.h>
-
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-#error Bluetooth is not enabled! Please run make menuconfig to and enable it
-#endif
-
-// // TB6612FNG pinout
-#define RIN1 5
-#define LIN1 17
-#define RIN2 18
-#define LIN2 16
-#define PWMR 19
-#define PWML 4
-
-const uint8_t numberOfFrontSensors = 6;
-const uint8_t frontSensorPins[] = {32, 33, 25, 26, 27, 14};
-const uint8_t rightMotorPins[] = {RIN1, RIN2, PWMR};
-const uint8_t leftMotorPins[] = {LIN1, LIN2, PWML};
-const uint8_t lateralSensorPin = 34;
+#include <Pinout.h>
 
 int16_t maxspeed = 100;
 
-Arthas arthas = Arthas(leftMotorPins, rightMotorPins, frontSensorPins, numberOfFrontSensors, lateralSensorPin, maxspeed);
+Arthas arthas = Arthas(
+	pins::leftMotor,
+	pins::rightMotor,
+	pins::frontSensorCommon,
+	pins::frontSensorSelect,
+	pins::frontSensorCount,
+	pins::lateralSensorLeft,
+	pins::lateralSensorRight,
+	maxspeed,
+	pins::leftMotorInverted,
+	pins::rightMotorInverted
+);
 
 void setup() {
-	arthas.setupBluetooth();
+	arthas.setupConsole();
+	arthas.setupMotors();
 	arthas.setupFrontSensor();
-	arthas.setupLateralSensor();
+	arthas.setupLateralSensors();
+
+	/* O host demora a enumerar o USB CDC; sem esta folga o menu sai antes de
+	 * alguem estar escutando e a serial abre em branco. */
+	delay(1500);
+	arthas.printMenu();
 }
 
 void loop() {
-	ArthasAction action = arthas.parseBluetoothInput();
+	ArthasAction action = arthas.parseInput();
 	if (action != ArthasAction::None) {
 		switch(action) {
+			case ArthasAction::LeftMotorTest:
+				arthas.testLeftMotor();
+				break;
+			case ArthasAction::RightMotorTest:
+				arthas.testRightMotor();
+				break;
 			case ArthasAction::BothMotorsTest:
 				arthas.testBothMotors();
 				break;
@@ -46,13 +51,22 @@ void loop() {
 			case ArthasAction::FrontSensorTestWhileLine:
 				arthas.testFrontSensorWhiteLine();
 				break;
+			case ArthasAction::LateralSensorTest:
+				arthas.testLateralSensor();
+				break;
 			case ArthasAction::Calibrate:
 				arthas.calibrateFrontSensor();
 				break;
 			case ArthasAction::UpdateConstants:
-				arthas.printlnBT("Updated Constants!");
+				arthas.println("Updated Constants!");
 				arthas.printMaxSpeed();
 				arthas.printPID();
+				break;
+			case ArthasAction::ShowStatus:
+				arthas.printStatus();
+				break;
+			case ArthasAction::ShowMenu:
+				arthas.printMenu();
 				break;
 			case ArthasAction::DriveLap:
 				arthas.driveLap(5);
@@ -64,10 +78,13 @@ void loop() {
 				arthas.stopMotors();
 				break;
 			case ArthasAction::BluetoothConnected:
-				arthas.printlnBT("Cliente Conectado!");
+				arthas.println("Cliente Conectado!");
+				arthas.printMenu();
 				break;
 			case ArthasAction::BluetoothDisconnected:
-				arthas.printlnBT("Cliente Desconectado!");
+				arthas.println("Cliente Desconectado!");
+				break;
+			default:
 				break;
 		}
 	}

@@ -1,5 +1,4 @@
 #pragma once
-#include <SparkFun_TB6612.h>
 #include <MotorArthas.h>
 
 class Powertrain {
@@ -8,9 +7,12 @@ class Powertrain {
         MotorArthas rightMotor;
 
     public:
-        Powertrain(const uint8_t* leftPins, const uint8_t* rightPins);
+        /* pins = {direção, pwm} para cada motor. */
+        Powertrain(const uint8_t* leftPins, const uint8_t* rightPins,
+                   const bool invertLeft = false, const bool invertRight = false);
         ~Powertrain();
 
+        void setup();
         void leftMotorDrive(const int16_t speed);
         void rightMotorDrive(const int16_t speed);
         void motorsDrive(const int16_t leftMotorSpeed, const int16_t rightMotorSpeed);

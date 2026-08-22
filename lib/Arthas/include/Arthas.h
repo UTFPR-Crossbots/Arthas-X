@@ -1,11 +1,9 @@
 #pragma once
 #include "PID.h"
-#include "Bluetooth.h"
+#include "Console.h"
 #include "FrontSensor.h"
 #include "LateralSensor.h"
 #include "Powertrain.h"
-#include <QTRSensors.h>
-#include <SparkFun_TB6612.h>
 
 enum class ArthasAction {
     None = 0,
@@ -18,6 +16,8 @@ enum class ArthasAction {
     LateralSensorTest,
     Calibrate,
     UpdateConstants,
+    ShowStatus,
+    ShowMenu,
     DriveLap,
     Chase,
     Stop,
@@ -27,30 +27,46 @@ enum class ArthasAction {
 
 class Arthas {
     private:
-        Bluetooth bluetooth;
+        Console console;
         Powertrain powertrain;
         FrontSensor frontSensor;
-        LateralSensor lateralSensor;
+        LateralSensor lateralSensorLeft;
+        LateralSensor lateralSensorRight;
         PIDController pid;
         int16_t maxspeed;
-        uint8_t frontSensorPins[8];
         double tempo;
         uint8_t marcas;
 
+        /* Comandos "kp 0.35", "vel 120" etc., pensados para digitar na serial.
+         * Devolve true se a linha era um desses e já foi aplicada. */
+        bool parseValueCommand(const String& input);
+
     public:
-        Arthas(const uint8_t* leftMotorPins, const uint8_t* rightMotorPins, const uint8_t* frontSensorPins, const uint8_t numberOfPins, const uint8_t lateralSensorPin, const int16_t maxspeed);
+        /* leftMotorPins/rightMotorPins = {direção, pwm} (DRV8874 em PH/EN).
+         * frontSensorSelectPins = {S0, S1, S2, S3} do CD74HC4067, S0 é o LSB. */
+        Arthas(const uint8_t* leftMotorPins,
+               const uint8_t* rightMotorPins,
+               const uint8_t frontSensorCommonPin,
+               const uint8_t* frontSensorSelectPins,
+               const uint8_t numberOfFrontSensors,
+               const uint8_t leftLateralSensorPin,
+               const uint8_t rightLateralSensorPin,
+               const int16_t maxspeed,
+               const bool invertLeftMotor = false,
+               const bool invertRightMotor = false);
         ~Arthas();
 
-        /* Bluetooth */
+        /* Comunicação (BLE + serial USB) */
+        Console* getConsole();
         Bluetooth* getBluetooth();
-        void setupBluetooth();
-        const bool isBluetoothAvailable();
-        String readBluetoothInput();
-        ArthasAction parseBluetoothInput();
-        void printBT(const String msg);
-        void printBT(const int msg);
-        void printlnBT(const String msg = "");
-        void printlnBT(const int msg);
+        void setupConsole();
+        const bool isInputAvailable();
+        String readInput();
+        ArthasAction parseInput();
+        void print(const String msg);
+        void print(const int msg);
+        void println(const String msg = "");
+        void println(const int msg);
         void turnOffBluetooth();
 
         /* Line Sensors */
@@ -61,17 +77,20 @@ class Arthas {
         void testFrontSensorAnalogRead();
         void testFrontSensorWhiteLine();
 
-        /* Lateral Sensor */
-        void setupLateralSensor();
+        /* Lateral Sensors */
+        void setupLateralSensors();
         void testLateralSensor();
 
         /* Motors */
+        void setupMotors();
         void stopMotors();
         void testLeftMotor();
         void testRightMotor();
         void testBothMotors();
 
         /* Constants */
+        void printMenu();
+        void printStatus();
         void printMaxSpeed();
         void printPID();
 

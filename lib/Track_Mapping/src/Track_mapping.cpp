@@ -4,12 +4,12 @@ void Track::addTrackSection(int leftEncoderCount, int rightEncoderCount, int tra
   sections.emplace_back(leftEncoderCount, rightEncoderCount, trackSection);
 }
 
-void Track::printTrackInformation(BluetoothSerial& SerialBT) {
-  SerialBT.println("Left Encoder Count, Right Encoder Count");
+void Track::printTrackInformation(Console& console) {
+  console.println("Left Encoder Count, Right Encoder Count");
   for(const TrackSectionInformation& section : sections) {
-    SerialBT.print(section.leftEncoderCount);
-    SerialBT.print(",");
-    SerialBT.print(section.rightEncoderCount);
-    SerialBT.print(",");
+    console.print(section.leftEncoderCount);
+    console.print(",");
+    console.print(section.rightEncoderCount);
+    console.print(",");
   }
 }
