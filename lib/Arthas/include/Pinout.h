@@ -47,16 +47,17 @@ namespace pins {
      * "suc <0-100>"; este é só o valor com que o robô liga. */
     constexpr uint8_t suctionRaceThrottle = 80;
 
-    /* --- Alocação de canais do LEDC ---
-     * O core mapeia timer = (canal / 2) % 4, então canais que compartilham
-     * timer compartilham frequência. Motores (0 e 1) ficam juntos no timer 0
-     * a 20 kHz; a sucção precisa de 50 Hz, logo tem de sair desse par.
+    /* --- Alocação de timers do LEDC ---
+     * O core mapeia timer = (canal / 2) % 4, então canais no mesmo timer
+     * compartilham frequência:
      *
-     *   0 -> motor esquerdo   (timer 0, 20 kHz, 8 bits)
-     *   1 -> motor direito    (timer 0, 20 kHz, 8 bits)
-     *   2 -> sucção / ESC     (timer 1, 50 Hz, 16 bits)
-     */
-    constexpr uint8_t suctionLedcChannel = 2;
+     *   timer 0 -> canais 0 e 1: motores de tração, 20 kHz (ledc na mão)
+     *   timer 2 -> canal 4:      sucção / ESC, 50 Hz (ESP32Servo)
+     *
+     * A ESP32Servo, por padrão, procura timer livre a partir do 0 e roubaria
+     * o dos motores. Por isso SuctionMotor::setup() chama allocateTimer() com
+     * este número, que reserva a biblioteca a um timer só. */
+    constexpr uint8_t suctionPwmTimer = 2;
 
     /* --- Reservado: fora do escopo do bring-up, sem driver ainda --- */
     namespace reserved {

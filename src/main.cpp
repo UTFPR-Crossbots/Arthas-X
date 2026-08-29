@@ -13,7 +13,7 @@ Arthas arthas = Arthas(
 	pins::lateralSensorLeft,
 	pins::lateralSensorRight,
 	pins::suctionEsc,
-	pins::suctionLedcChannel,
+	pins::suctionPwmTimer,
 	pins::suctionRaceThrottle,
 	maxspeed,
 	pins::leftMotorInverted,
@@ -21,9 +21,9 @@ Arthas arthas = Arthas(
 );
 
 void setup() {
-	/* Primeiro de tudo: o ESC so arma depois de receber throttle minimo por
-	 * ~2 s, e o setupConsole() (NimBLE) demora. Comecar por aqui faz o ESC
-	 * armar durante o resto do boot. */
+	/* Primeiro de tudo, e bloqueante: o ESC so arma depois de receber o pulso
+	 * neutro sustentado por ~3 s. Ate isso terminar ele ignora qualquer
+	 * comando, entao nao ha o que fazer em paralelo. */
 	arthas.setupSuction();
 
 	arthas.setupConsole();

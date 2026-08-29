@@ -66,7 +66,7 @@ class Arthas {
                const uint8_t leftLateralSensorPin,
                const uint8_t rightLateralSensorPin,
                const uint8_t suctionEscPin,
-               const uint8_t suctionLedcChannel,
+               const uint8_t suctionPwmTimer,
                const uint8_t suctionRaceThrottle,
                const int16_t maxspeed,
                const bool invertLeftMotor = false,

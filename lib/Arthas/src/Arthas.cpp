@@ -14,7 +14,7 @@ Arthas::Arthas(const uint8_t* leftMotorPins,
                const uint8_t leftLateralSensorPin,
                const uint8_t rightLateralSensorPin,
                const uint8_t suctionEscPin,
-               const uint8_t suctionLedcChannel,
+               const uint8_t suctionPwmTimer,
                const uint8_t suctionRaceThrottle,
                const int16_t maxspeed,
                const bool invertLeftMotor,
@@ -24,7 +24,7 @@ Arthas::Arthas(const uint8_t* leftMotorPins,
 	frontSensor(frontSensorCommonPin, frontSensorSelectPins, numberOfFrontSensors),
 	lateralSensorLeft(leftLateralSensorPin, true),
 	lateralSensorRight(rightLateralSensorPin, false),
-	suction(suctionEscPin, suctionLedcChannel),
+	suction(suctionEscPin, suctionPwmTimer),
 	pid(numberOfFrontSensors),
 	maxspeed(maxspeed),
 	tempo(0),
@@ -337,13 +337,6 @@ void Arthas::setupSuction() {
 }
 
 void Arthas::testSuction() {
-	if (!suction.isArmed()) {
-		console.println("ESC ainda armando, aguarde...");
-		/* delay() cede o processador: um spin vazio aqui starva a idle task
-		 * e derruba o watchdog. */
-		while (!suction.isArmed()) delay(1);
-	}
-
 	console.print("Succao a ");
 	console.print((int)suctionThrottle);
 	console.println("%. 'c' para parar.");
@@ -357,7 +350,9 @@ void Arthas::testSuction() {
 		if (millis() - lastPrint > 500) {
 			console.print("throttle: ");
 			console.print((int)suction.getCurrent());
-			console.println("%");
+			console.print("% (");
+			console.print((int)suction.getCurrentPulse());
+			console.println(" us)");
 			lastPrint = millis();
 		}
 	}

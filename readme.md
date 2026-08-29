@@ -148,32 +148,40 @@ automática. Recalibrar refaz a detecção e sobrescreve o que foi forçado.
 Sinal no **GPIO 10** (net `CL`), canal 2 do LEDC. Liga automaticamente no `chase` e no `driveLap`,
 e o `c` (parar) corta junto com os motores — `stopMotors()` desliga os dois.
 
-O LittleBee Spring é um BLHeli_S: fala **PWM de servo (1000–2000 µs a 50 Hz)**, não o PWM de ponte H
-dos motores de tração. Por isso tem driver próprio,
-[`SuctionMotor`](lib/Arthas/include/SuctionMotor.h), e não reaproveita o `MotorArthas`.
+O LittleBee Spring é um BLHeli_S: fala **PWM de servo a 50 Hz**, não o PWM de ponte H dos motores de
+tração. Por isso tem driver próprio, [`SuctionMotor`](lib/Arthas/include/SuctionMotor.h), construído
+sobre a **ESP32Servo**, e não reaproveita o `MotorArthas`.
 
-- **Armação.** O BLHeli só aceita comando depois de receber throttle mínimo por ~2 s. O
-  `setupSuction()` é a **primeira** coisa do `setup()`, justamente para o ESC armar durante o resto
-  do boot (o NimBLE demora). `isArmed()` impede acelerar antes disso.
+### ⚠️ O neutro é 1488 µs, não 1000
+
+Este ESC está em **modo bidirecional (3D)**: o neutro fica em ~1500 µs, e não em 1000 µs como num
+ESC unidirecional. Mandar 1000 µs **não liga o motor** — a faixa útil para frente vai de
+**1488 µs (parado) a 2000 µs (cheio)**.
+
+- **Armação.** O BLHeli arma depois de receber o pulso neutro sustentado por ~3 s. O
+  `setupSuction()` é a **primeira** coisa do `setup()` e **bloqueia** esses 3 s: até terminar o ESC
+  ignora qualquer comando, então não há o que fazer em paralelo. O boot inteiro leva ~5 s.
 - **Rampa.** Um ESC de 20 A puxando corrente num degrau derruba a tensão da placa. `setTarget()` só
-  define o alvo; `update()` caminha até ele a 200 %/s (0→100 % em 0,5 s) e **não bloqueia** — é
+  define o alvo; `update()` caminha até ele a 250 µs/s (faixa toda em ~2 s) e **não bloqueia** — é
   chamado de dentro da malha de controle, sem atrapalhar o seguimento de linha.
 - **Parada** é imediata, sem rampa: é o caminho de segurança.
 
 O `CL` não aparecia com função definida em nenhuma das folhas de esquemático, então o barramento SPI
 (`MOSI` 11, `SCLK` 12, `MISO` 13) fica intacto — IMU e encoders seguem viáveis.
 
-### Alocação de canais do LEDC
+### ⚠️ A ESP32Servo rouba o timer dos motores se deixar
 
 O core mapeia `timer = (canal / 2) % 4`, então canais no mesmo timer compartilham frequência:
 
-| Canal | Timer | Uso | Config |
+| Timer | Canais | Uso | Frequência |
 |---|---|---|---|
-| 0 | 0 | Motor esquerdo | 20 kHz, 8 bits |
-| 1 | 0 | Motor direito | 20 kHz, 8 bits |
-| 2 | 1 | Sucção / ESC | 50 Hz, 16 bits |
+| 0 | 0 e 1 | Motores de tração (`ledc` na mão) | 20 kHz |
+| 2 | 4 | Sucção / ESC (ESP32Servo) | 50 Hz |
 
-A sucção precisa sair do par 0/1 justamente porque 50 Hz e 20 kHz não cabem no mesmo timer.
+A ESP32Servo, por padrão, procura timer livre **a partir do 0** — que é justamente o dos motores — e
+o reconfiguraria para 50 Hz, quebrando o PWM das rodas. Por isso `SuctionMotor::setup()` chama
+`ESP32PWM::allocateTimer(pins::suctionPwmTimer)`, que marca todos os timers como ocupados e libera
+só o 2 para a biblioteca.
 
 ## Hardware — o que mudou em relação à placa antiga
 

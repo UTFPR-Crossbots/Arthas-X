@@ -1,38 +1,37 @@
 #include <SuctionMotor.h>
 
-SuctionMotor::SuctionMotor(const uint8_t signalPin, const uint8_t ledcChannel) :
+SuctionMotor::SuctionMotor(const uint8_t signalPin, const uint8_t pwmTimer) :
     signalPin(signalPin),
-    ledcChannel(ledcChannel),
+    pwmTimer(pwmTimer),
     targetThrottle(0),
-    currentThrottle(0),
-    lastUpdate(0),
-    armStartTime(0)
+    currentPulse_us(neutralPulse_us),
+    lastUpdate(0)
 {}
 
 SuctionMotor::~SuctionMotor() {}
 
 void SuctionMotor::setup() {
-    ledcSetup(ledcChannel, frequency_hz, resolutionBits);
-    ledcAttachPin(signalPin, ledcChannel);
+    /* Sem isto a ESP32Servo começa procurando timer a partir do 0 — que é o
+     * dos motores de tração, a 20 kHz — e o reconfiguraria para 50 Hz,
+     * quebrando o PWM das rodas. allocateTimer() marca todos como ocupados e
+     * libera só este. */
+    ESP32PWM::allocateTimer(pwmTimer);
+
+    esc.setPeriodHertz(frequency_hz);
+    esc.attach(signalPin, minPulse_us, maxPulse_us);
+
+    /* Neutro sustentado é o que arma o BLHeli. */
+    esc.writeMicroseconds(neutralPulse_us);
+    delay(armingTime_ms);
 
     targetThrottle = 0;
-    currentThrottle = 0;
-    writeThrottle(0);   // throttle mínimo: é isso que arma o BLHeli
-
-    armStartTime = millis();
-    lastUpdate = armStartTime;
+    currentPulse_us = neutralPulse_us;
+    lastUpdate = millis();
 }
 
-void SuctionMotor::writeThrottle(const double throttlePercent) {
-    const double clamped = constrain(throttlePercent, 0.0, 100.0);
-
-    const double pulseWidth_us = minPulseWidth_us +
-        (maxPulseWidth_us - minPulseWidth_us) * clamped / 100.0;
-
-    const uint32_t period_us = 1000000UL / frequency_hz;
-    const uint32_t duty = (uint32_t)(pulseWidth_us * ((1UL << resolutionBits) - 1) / period_us);
-
-    ledcWrite(ledcChannel, duty);
+double SuctionMotor::throttleToPulse(const uint8_t throttlePercent) const {
+    const uint8_t clamped = throttlePercent > 100 ? 100 : throttlePercent;
+    return neutralPulse_us + (double)(maxPulse_us - neutralPulse_us) * clamped / 100.0;
 }
 
 void SuctionMotor::setTarget(const uint8_t throttlePercent) {
@@ -46,35 +45,30 @@ void SuctionMotor::update() {
     if (elapsed == 0) return;
     lastUpdate = now;
 
-    /* Antes de armar o alvo é sempre 0, senão o ESC ignora e fica beepando. */
-    const double target = isArmed() ? (double)targetThrottle : 0.0;
-    const double maxStep = (rampRate_percentPerSecond * (double)elapsed) / 1000.0;
+    const double target = throttleToPulse(targetThrottle);
+    const double maxStep = (rampRate_usPerSecond * (double)elapsed) / 1000.0;
 
-    if (currentThrottle < target) {
-        currentThrottle += maxStep;
-        if (currentThrottle > target) currentThrottle = target;
+    if (currentPulse_us < target) {
+        currentPulse_us += maxStep;
+        if (currentPulse_us > target) currentPulse_us = target;
     }
-    else if (currentThrottle > target) {
-        currentThrottle -= maxStep;
-        if (currentThrottle < target) currentThrottle = target;
+    else if (currentPulse_us > target) {
+        currentPulse_us -= maxStep;
+        if (currentPulse_us < target) currentPulse_us = target;
     }
     else {
         return;
     }
 
-    writeThrottle(currentThrottle);
+    esc.writeMicroseconds((int)currentPulse_us);
 }
 
 void SuctionMotor::stop() {
     /* Parada é imediata, sem rampa: é o caminho de segurança. */
     targetThrottle = 0;
-    currentThrottle = 0;
+    currentPulse_us = neutralPulse_us;
     lastUpdate = millis();
-    writeThrottle(0);
-}
-
-bool SuctionMotor::isArmed() const {
-    return (millis() - armStartTime) >= armingTime_ms;
+    esc.writeMicroseconds(neutralPulse_us);
 }
 
 uint8_t SuctionMotor::getTarget() const {
@@ -82,5 +76,11 @@ uint8_t SuctionMotor::getTarget() const {
 }
 
 uint8_t SuctionMotor::getCurrent() const {
-    return (uint8_t)(currentThrottle + 0.5);
+    const double span = maxPulse_us - neutralPulse_us;
+    const double percent = (currentPulse_us - neutralPulse_us) * 100.0 / span;
+    return (uint8_t)(percent < 0 ? 0 : percent + 0.5);
+}
+
+uint16_t SuctionMotor::getCurrentPulse() const {
+    return (uint16_t)currentPulse_us;
 }
