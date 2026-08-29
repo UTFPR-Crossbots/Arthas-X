@@ -2,8 +2,6 @@
 #include <Arthas.h>
 #include <Pinout.h>
 
-int16_t maxspeed = 100;
-
 Arthas arthas = Arthas(
 	pins::leftMotor,
 	pins::rightMotor,
@@ -14,16 +12,21 @@ Arthas arthas = Arthas(
 	pins::lateralSensorRight,
 	pins::suctionEsc,
 	pins::suctionPwmTimer,
-	pins::suctionRaceThrottle,
-	maxspeed,
+	pins::irReceiver,
+	pins::buzzer,
+	pins::buzzerActiveLow,
 	pins::leftMotorInverted,
 	pins::rightMotorInverted
 );
 
 void setup() {
-	/* Primeiro de tudo, e bloqueante: o ESC so arma depois de receber o pulso
-	 * neutro sustentado por ~3 s. Ate isso terminar ele ignora qualquer
-	 * comando, entao nao ha o que fazer em paralelo. */
+	/* Buzzer primeiro: e o unico jeito de saber que o boot comecou, ja que os
+	 * 3 s de armacao do ESC vem logo em seguida e a serial ainda nem existe. */
+	arthas.setupBuzzer();
+
+	/* Bloqueante: o ESC so arma depois de receber o pulso neutro sustentado
+	 * por ~3 s. Ate isso terminar ele ignora qualquer comando, entao nao ha o
+	 * que fazer em paralelo. */
 	arthas.setupSuction();
 
 	arthas.setupConsole();
@@ -35,9 +38,15 @@ void setup() {
 	 * alguem estar escutando e a serial abre em branco. */
 	delay(1500);
 	arthas.printMenu();
+	arthas.beepReady();
 }
 
 void loop() {
+	/* Avanca a rampa da succao e o buzzer. Precisa rodar TODA iteracao: sem
+	 * isso a rampa de desaceleracao congelaria no ponto em que o modo
+	 * terminou, e a succao ficaria girando depois do comando de parada. */
+	arthas.update();
+
 	ArthasAction action = arthas.parseInput();
 	if (action != ArthasAction::None) {
 		switch(action) {
@@ -65,13 +74,11 @@ void loop() {
 			case ArthasAction::SuctionTest:
 				arthas.testSuction();
 				break;
+			case ArthasAction::IrCapture:
+				arthas.captureIrCodes();
+				break;
 			case ArthasAction::Calibrate:
 				arthas.calibrateFrontSensor();
-				break;
-			case ArthasAction::UpdateConstants:
-				arthas.println("Updated Constants!");
-				arthas.printMaxSpeed();
-				arthas.printPID();
 				break;
 			case ArthasAction::ShowStatus:
 				arthas.printStatus();
@@ -80,7 +87,7 @@ void loop() {
 				arthas.printMenu();
 				break;
 			case ArthasAction::DriveLap:
-				arthas.driveLap(5);
+				arthas.driveLap();
 				break;
 			case ArthasAction::Chase:
 				arthas.chase();
@@ -88,12 +95,7 @@ void loop() {
 			case ArthasAction::Stop:
 				arthas.stopMotors();
 				break;
-			case ArthasAction::BluetoothConnected:
-				arthas.println("Cliente Conectado!");
-				arthas.printMenu();
-				break;
-			case ArthasAction::BluetoothDisconnected:
-				arthas.println("Cliente Desconectado!");
+			case ArthasAction::SensorMaskChanged:
 				break;
 			default:
 				break;

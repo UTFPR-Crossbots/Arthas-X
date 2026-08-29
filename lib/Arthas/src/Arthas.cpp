@@ -1,10 +1,5 @@
 #include <Arthas.h>
-
-namespace {
-	/* Formato do pacote de constantes vindo do app: os índices abaixo vão até
-	 * 29, então qualquer coisa mais curta é fragmento de BLE, não pacote. */
-	const uint16_t constantsPacketLength = 29;
-}
+#include <Tuning.h>
 
 Arthas::Arthas(const uint8_t* leftMotorPins,
                const uint8_t* rightMotorPins,
@@ -15,34 +10,36 @@ Arthas::Arthas(const uint8_t* leftMotorPins,
                const uint8_t rightLateralSensorPin,
                const uint8_t suctionEscPin,
                const uint8_t suctionPwmTimer,
-               const uint8_t suctionRaceThrottle,
-               const int16_t maxspeed,
+               const uint8_t irReceiverPin,
+               const uint8_t buzzerPin,
+               const bool buzzerActiveLow,
                const bool invertLeftMotor,
                const bool invertRightMotor):
-	console(),
+	console(irReceiverPin),
+	buzzer(buzzerPin, buzzerActiveLow),
 	powertrain(leftMotorPins, rightMotorPins, invertLeftMotor, invertRightMotor),
 	frontSensor(frontSensorCommonPin, frontSensorSelectPins, numberOfFrontSensors),
 	lateralSensorLeft(leftLateralSensorPin, true),
 	lateralSensorRight(rightLateralSensorPin, false),
 	suction(suctionEscPin, suctionPwmTimer),
-	pid(numberOfFrontSensors),
-	maxspeed(maxspeed),
-	tempo(0),
-	marcas(0),
-	reverseRatio(0.5),
-	suctionThrottle(suctionRaceThrottle)
+	pid(numberOfFrontSensors, tuning::kP, tuning::kI, tuning::kD),
+	maxspeed(tuning::maxSpeed),
+	marcas(tuning::markersPerLap),
+	reverseRatio(tuning::reverseRatio),
+	suctionThrottle(tuning::suctionThrottle)
 {}
 
 Arthas::~Arthas() {
 }
 
+void Arthas::update() {
+	suction.update();
+	buzzer.update();
+}
+
 /* Comunicação */
 Console* Arthas::getConsole() {
 	return &console;
-}
-
-Bluetooth* Arthas::getBluetooth() {
-	return console.getBluetooth();
 }
 
 void Arthas::setupConsole() {
@@ -57,53 +54,19 @@ String Arthas::readInput() {
 	return console.readInput();
 }
 
-bool Arthas::parseValueCommand(const String& input) {
-	if (input.startsWith("kp ")) {
-		pid.updatePIDConstants(input.substring(3).toDouble(), pid.getI(), pid.getD());
-		return true;
-	}
-	if (input.startsWith("ki ")) {
-		pid.updatePIDConstants(pid.getP(), input.substring(3).toDouble(), pid.getD());
-		return true;
-	}
-	if (input.startsWith("kd ")) {
-		pid.updatePIDConstants(pid.getP(), pid.getI(), input.substring(3).toDouble());
-		return true;
-	}
-	if (input.startsWith("vel ")) {
-		maxspeed = constrain(input.substring(4).toInt(), 0, MotorArthas::maxDutyCycle);
-		return true;
-	}
-	if (input.startsWith("marcas ")) {
-		marcas = (uint8_t)input.substring(7).toInt();
-		return true;
-	}
-	if (input.startsWith("suc ")) {
-		suctionThrottle = (uint8_t)constrain(input.substring(4).toInt(), 0, 100);
-		return true;
-	}
-	if (input.startsWith("rev ")) {
-		reverseRatio = constrain(input.substring(4).toInt(), 0, 100) / 100.0;
-		return true;
-	}
-	if (input.startsWith("off ")) {
-		const uint8_t index = (uint8_t)input.substring(4).toInt();
-		frontSensor.setSensorEnabled(index, false);
-		console.print("Sensor ");
-		console.print((int)index);
-		console.println(" desabilitado.");
-		return true;
-	}
-	if (input.startsWith("on ")) {
-		const uint8_t index = (uint8_t)input.substring(3).toInt();
-		frontSensor.setSensorEnabled(index, true);
-		console.print("Sensor ");
-		console.print((int)index);
-		console.println(" habilitado.");
-		return true;
-	}
+bool Arthas::parseSensorMaskCommand(const String& input) {
+	const bool disable = input.startsWith("off ");
+	const bool enable = input.startsWith("on ");
 
-	return false;
+	if (!disable && !enable) return false;
+
+	const uint8_t index = (uint8_t)input.substring(disable ? 4 : 3).toInt();
+	frontSensor.setSensorEnabled(index, enable);
+
+	console.print("Sensor ");
+	console.print((int)index);
+	console.println(enable ? " habilitado." : " desabilitado.");
+	return true;
 }
 
 void Arthas::applyCorrection(const int16_t baseSpeed, const double correction) {
@@ -127,93 +90,50 @@ void Arthas::applyCorrection(const int16_t baseSpeed, const double correction) {
 }
 
 ArthasAction Arthas::parseInput() {
-	if (!isInputAvailable()) return ArthasAction::None;
+	const bool hasInput = isInputAvailable();
+
+	/* Código IR fora da tabela: avisa por som. O controle remoto não tem
+	 * canal de volta, então sem o buzzer não haveria como saber na pista que
+	 * a tecla chegou mas não significa nada. */
+	if (console.consumeUnknownIrCode()) {
+		buzzer.beepLong();
+		console.println("Codigo IR desconhecido. Use 'x' para capturar.");
+	}
+
+	if (!hasInput) return ArthasAction::None;
 
 	String input = readInput();
 	input.trim();
 
 	if (input.length() == 0) return ArthasAction::None;
 
-	if (input == "a") {
-		return ArthasAction::Calibrate;
-	}
-	else if (input == "b") {
-		return ArthasAction::DriveLap;
-	}
-	else if (input == "c") {
-		return ArthasAction::Stop;
-	}
-	else if (input == "d") {
-		return ArthasAction::LateralSensorTest;
-	}
-	else if (input == "e") {
-		return ArthasAction::Chase;
-	}
-	else if (input == "f") {
-		return ArthasAction::BothMotorsTest;
-	}
-	else if (input == "g") {
-		return ArthasAction::FrontSensorTestWhileLine;
-	}
-	else if (input == "h") {
-		return ArthasAction::FrontSensorTest;
-	}
-	else if (input == "i") {
-		return ArthasAction::FrontSensorTestAnalogRead;
-	}
-	else if (input == "j") {
-		return ArthasAction::LeftMotorTest;
-	}
-	else if (input == "k") {
-		return ArthasAction::RightMotorTest;
-	}
-	else if (input == "l") {
-		return ArthasAction::SuctionTest;
-	}
-	else if (input == "s") {
-		return ArthasAction::ShowStatus;
-	}
-	else if (input == "?" || input == "m") {
-		return ArthasAction::ShowMenu;
-	}
-	else if(input == "Cliente Conectado!"){
-		return ArthasAction::BluetoothConnected;
-	}
-	else if (input ==  "Cliente Desconectado!") {
-		return ArthasAction::BluetoothDisconnected;
-	}
-	/* Comandos com valor ("kp 0.35", "vel 120"), pensados para a serial. */
-	else if (parseValueCommand(input)) {
-		return ArthasAction::UpdateConstants;
-	}
-	// This code is ugly, it should not do the functions calls here but the input from the app is trash so this is the best way
-	// TODO: Change the app to a better way of sending PIDs Constants
+	ArthasAction action = ArthasAction::None;
+
+	if (input == "a")      action = ArthasAction::Calibrate;
+	else if (input == "b") action = ArthasAction::DriveLap;
+	else if (input == "c") action = ArthasAction::Stop;
+	else if (input == "d") action = ArthasAction::LateralSensorTest;
+	else if (input == "e") action = ArthasAction::Chase;
+	else if (input == "f") action = ArthasAction::BothMotorsTest;
+	else if (input == "g") action = ArthasAction::FrontSensorTestWhileLine;
+	else if (input == "h") action = ArthasAction::FrontSensorTest;
+	else if (input == "i") action = ArthasAction::FrontSensorTestAnalogRead;
+	else if (input == "j") action = ArthasAction::LeftMotorTest;
+	else if (input == "k") action = ArthasAction::RightMotorTest;
+	else if (input == "l") action = ArthasAction::SuctionTest;
+	else if (input == "x") action = ArthasAction::IrCapture;
+	else if (input == "s") action = ArthasAction::ShowStatus;
+	else if (input == "?" || input == "m") action = ArthasAction::ShowMenu;
+	else if (parseSensorMaskCommand(input)) action = ArthasAction::SensorMaskChanged;
 	else {
-		/* Sem esta guarda, um fragmento de BLE cairia aqui e sobrescreveria
-		 * Kp/Kd com lixo sem ninguém perceber. O SPP não tinha esse problema
-		 * porque readString() esperava o pacote inteiro. */
-		if (input.length() < constantsPacketLength) {
-			console.println("Comando desconhecido: '" + input + "'. Digite ? para o menu.");
-			return ArthasAction::None;
-		}
-
-		String rawKp = input.substring(2,9);
-		double kP = rawKp.toDouble();
-
-		String rawKi = input.substring(10,17);
-		marcas = (uint8_t)rawKi.toInt();
-
-		String rawKd = input.substring(18,25);
-		double kD = rawKd.toDouble();
-
-		pid.updatePIDConstants(kP, 0, kD);
-
-		String rawSpeed = input.substring(26,29);
-		uint8_t speed = (uint8_t)rawSpeed.toInt();
-		maxspeed = speed;
-
-		return ArthasAction::UpdateConstants;
+		console.println("Comando desconhecido: '" + input + "'. Digite ? para o menu.");
+		return ArthasAction::None;
 	}
+
+	/* Confirmação sonora: dois beeps para parada, um para o resto. */
+	buzzer.beep(action == ArthasAction::Stop ? 2 : 1);
+
+	return action;
 }
 
 void Arthas::print(const String msg) {
@@ -232,10 +152,6 @@ void Arthas::println(const int msg) {
 	console.println(msg);
 }
 
-void Arthas::turnOffBluetooth() {
-	console.turnOffBluetooth();
-}
-
 /* Line Sensor */
 void Arthas::setupFrontSensor() {
 	frontSensor.setup();
@@ -247,6 +163,7 @@ void Arthas::calibrateFrontSensor() {
 	frontSensor.calibrate();
 	console.println("//---Calibration finished---//");
 	reportDisabledSensors();
+	buzzer.beep(3);
 }
 
 const uint16_t Arthas::readLineWhiteFrontSensor() {
@@ -259,12 +176,14 @@ void Arthas::testFrontSensor() {
 	unsigned long lastPrint = 0;
 
 	if (!frontSensor.isCalibrated()) {
-		console.println("AVISO: barra ainda nao calibrada (comando 'a').");
+		console.println("AVISO: barra ainda nao calibrada (tecla 1 / comando 'a').");
 	}
-	console.println("Calibrado (0-1000) | posicao. 'c' para parar.");
+	console.println("Calibrado (0-1000) | posicao. Tecla 0 (ou 'c') para parar.");
 
 	/* Sai no comando de parada — sem isso o bring-up trava aqui para sempre. */
 	while (parseInput() != ArthasAction::Stop) {
+		update();
+
 		if (millis() - lastPrint > 300) {
 			frontSensor.readCalibrated(sensorValues);
 			for(uint8_t i = 0; i < numberOfSensors; i++) {
@@ -285,9 +204,11 @@ void Arthas::testFrontSensorAnalogRead() {
 	uint16_t sensorValues[numberOfSensors];
 	unsigned long lastPrint = 0;
 
-	console.println("Cru do ADC (0-4095). Branco = valor MENOR. 'c' para parar.");
+	console.println("Cru do ADC (0-4095). Branco = valor MENOR. Tecla 0 para parar.");
 
 	while (parseInput() != ArthasAction::Stop) {
+		update();
+
 		if (millis() - lastPrint > 300) {
 			/* Passa pelo mux: não existe mais um GPIO por sensor. */
 			frontSensor.readRaw(sensorValues);
@@ -316,9 +237,11 @@ void Arthas::setupLateralSensors() {
 void Arthas::testLateralSensor() {
 	unsigned long lastPrint = 0;
 
-	console.println("Laterais: esq analogico (0-4095), dir digital. 'c' para parar.");
+	console.println("Laterais: esq analogico (0-4095), dir digital. Tecla 0 para parar.");
 
 	while (parseInput() != ArthasAction::Stop) {
+		update();
+
 		if (millis() - lastPrint > 300) {
 			console.print("Esq: ");
 			console.print((int)lateralSensorLeft.read());
@@ -339,13 +262,13 @@ void Arthas::setupSuction() {
 void Arthas::testSuction() {
 	console.print("Succao a ");
 	console.print((int)suctionThrottle);
-	console.println("%. 'c' para parar.");
+	console.println("%. Tecla 0 (ou 'c') para parar.");
 
 	suction.setTarget(suctionThrottle);
 
 	unsigned long lastPrint = 0;
 	while (parseInput() != ArthasAction::Stop) {
-		suction.update();
+		update();
 
 		if (millis() - lastPrint > 500) {
 			console.print("throttle: ");
@@ -358,7 +281,54 @@ void Arthas::testSuction() {
 	}
 
 	suction.stop();
-	console.println("Succao parada.");
+	console.println("Succao descendo em rampa...");
+}
+
+/* Buzzer */
+void Arthas::setupBuzzer() {
+	buzzer.setup();
+}
+
+void Arthas::beepReady() {
+	buzzer.beep(3);
+}
+
+/* Infravermelho */
+void Arthas::captureIrCodes() {
+	IrRemote* remote = console.getIr();
+
+	/* Enquanto captura, os frames não podem virar comando na fila: eles
+	 * precisam chegar crus aqui. */
+	console.setIrEnabled(false);
+
+	console.println();
+	console.println("=== Captura de codigos IR ===");
+	console.println("Aperte as teclas 0-9 do controle, uma de cada vez.");
+	console.println("Anote os codigos e preencha lib/Arthas/include/IrCodes.h.");
+	console.println("Digite 'c' na serial para sair.");
+	console.println();
+
+	String protocol;
+	uint64_t code = 0;
+	uint16_t bits = 0;
+
+	while (parseInput() != ArthasAction::Stop) {
+		update();
+
+		if (remote->captureRaw(protocol, code, bits)) {
+			console.print("protocolo=");
+			console.print(protocol);
+			console.print("  bits=");
+			console.print((int)bits);
+			console.print("  codigo=0x");
+			console.println(String((uint32_t)(code >> 32), HEX) +
+			                String((uint32_t)code, HEX));
+			buzzer.beep(1);
+		}
+	}
+
+	console.setIrEnabled(true);
+	console.println("=== Fim da captura ===");
 }
 
 /* Motors */
@@ -368,7 +338,9 @@ void Arthas::setupMotors() {
 
 void Arthas::stopMotors() {
 	powertrain.stopMotors();
-	/* Parar e parar tudo: a succao nao pode continuar girando apos o 'c'. */
+	/* Parar e parar tudo. As rodas travam na hora; a succao desce em rampa,
+	 * o que so acontece porque update() continua sendo chamado pelo loop()
+	 * principal depois que este comando retorna. */
 	suction.stop();
 }
 
@@ -385,48 +357,71 @@ void Arthas::testRightMotor() {
 }
 
 void Arthas::testBothMotors() {
-	console.println("Testando os dois motores! 'c' para parar.");
+	console.println("Testando os dois motores! Tecla 0 (ou 'c') para parar.");
 	testLeftMotor();
 	testRightMotor();
 }
 
-/* Constants */
+/* Info */
 void Arthas::printMenu() {
 	console.println();
 	console.println("========================================");
-	console.println("   ARTHAS - menu de testes");
+	console.println("   ARTHAS - menu de comandos");
 	console.println("========================================");
-	console.println(" SENSORES");
-	console.println("  i   barra frontal - cru do ADC (0-4095)");
-	console.println("  h   barra frontal - calibrado (0-1000)");
-	console.println("  g   barra frontal - posicao (1 leitura)");
-	console.println("  a   calibrar a barra frontal (7 s)");
-	console.println("  d   sensores laterais (esq + dir)");
-	console.println("  off <n> / on <n>   ignorar/voltar um sensor da barra");
+	console.println(" CONTROLE IR (teclas numericas)  |  serial");
+	console.println("  1  calibrar a barra (7 s)      |  a");
+	console.println("  2  chase - segue a linha       |  e");
+	console.println("  3  volta com contagem de marcas|  b");
+	console.println("  4  barra frontal - cru do ADC  |  i");
+	console.println("  5  barra frontal - calibrado   |  h");
+	console.println("  6  sensores laterais           |  d");
+	console.println("  7  motor esquerdo              |  j");
+	console.println("  8  motor direito               |  k");
+	console.println("  9  succao (ESC)                |  l");
+	console.println("  0  >>> PARAR <<<               |  c");
 	console.println();
-	console.println(" MOTORES  (robo suspenso!)");
-	console.println("  j   testar motor esquerdo");
-	console.println("  k   testar motor direito");
+	console.println(" SO NA SERIAL");
 	console.println("  f   testar os dois motores");
-	console.println("  l   testar succao (ESC)");
-	console.println("  c   PARAR (sai dos testes continuos)");
-	console.println();
-	console.println(" MODOS");
-	console.println("  e   chase - segue a linha ate receber 'c'");
-	console.println("  b   volta - com contagem de marcas");
-	console.println();
-	console.println(" CONSTANTES");
-	console.println("  kp <valor>       ex: kp 50   (erro normalizado -1..1)");
-	console.println("  ki <valor>");
-	console.println("  kd <valor>");
-	console.println("  vel <0-255>      velocidade maxima");
-	console.println("  marcas <n>       marcas para fechar a volta");
-	console.println("  rev <0-100>      re da roda interna, % do maxspeed");
-	console.println("  suc <0-100>      throttle da succao na corrida");
-	console.println("  s                mostrar estado atual");
-	console.println();
+	console.println("  g   barra frontal - posicao (1 leitura)");
+	console.println("  x   capturar codigos do controle IR");
+	console.println("  off <n> / on <n>   ignorar/voltar um sensor da barra");
+	console.println("  s   mostrar estado atual");
 	console.println("  ?   mostrar este menu");
+	console.println();
+	console.println(" Constantes (PID, velocidade, marcas) ficam em Tuning.h:");
+	console.println(" ajustar no codigo e regravar.");
 	console.println("========================================");
+
+	if (!console.getIr()->isConfigured()) {
+		console.println();
+		console.println("!!! CONTROLE IR AINDA NAO CONFIGURADO !!!");
+		console.println("A tabela em IrCodes.h esta zerada, entao o controle");
+		console.println("nao responde. Rode 'x', anote os codigos das teclas");
+		console.println("0-9, preencha IrCodes.h e regrave.");
+		console.println();
+	}
+}
+
+void Arthas::printStatus() {
+	console.println("--- Estado ---");
+	printPID();
+	printMaxSpeed();
+	console.print("marcas: ");
+	console.println((int)marcas);
+	console.print("barra calibrada: ");
+	console.println(frontSensor.isCalibrated() ? "sim" : "nao");
+	reportDisabledSensors();
+	console.print("succao (corrida): ");
+	console.print((int)suctionThrottle);
+	console.print("% | saindo agora: ");
+	console.print((int)suction.getCurrent());
+	console.println("%");
+	console.print("re da roda interna: ");
+	console.print((int)(reverseRatio * 100));
+	console.println("% do maxspeed");
+	console.print("controle IR: ");
+	console.println(console.getIr()->isConfigured() ? "configurado"
+	                                                : "NAO configurado (ver 'x')");
 }
 
 void Arthas::reportDisabledSensors() {
@@ -453,27 +448,6 @@ void Arthas::reportDisabledSensors() {
 	}
 }
 
-void Arthas::printStatus() {
-	console.println("--- Estado ---");
-	printPID();
-	printMaxSpeed();
-	console.print("marcas: ");
-	console.println((int)marcas);
-	console.print("barra calibrada: ");
-	console.println(frontSensor.isCalibrated() ? "sim" : "nao");
-	reportDisabledSensors();
-	console.print("succao (corrida): ");
-	console.print((int)suctionThrottle);
-	console.print("% | saindo agora: ");
-	console.print((int)suction.getCurrent());
-	console.println("%");
-	console.print("re da roda interna: ");
-	console.print((int)(reverseRatio * 100));
-	console.println("% do maxspeed");
-	console.print("BLE conectado: ");
-	console.println(console.isBluetoothConnected() ? "sim" : "nao");
-}
-
 void Arthas::printMaxSpeed() {
 	console.print("maxSpeed: ");
 	console.println(maxspeed);
@@ -490,14 +464,12 @@ void Arthas::printPID() {
 }
 
 /* Modes */
-void Arthas::driveLap(const uint8_t markers) {
+void Arthas::driveLap() {
 	println("//---Comecando primeira volta---//");
 
 	/* A succao entra junto com a corrida; update() faz a rampa dentro da
 	 * malha, sem bloquear o controle da linha. */
 	suction.setTarget(suctionThrottle);
-	// println("//---Turning off the bluetooth---//");
-	// turnOffBluetooth();
 
 	bool lapFinishedFlag = false;
 	bool isNewMarker = true;
@@ -508,7 +480,9 @@ void Arthas::driveLap(const uint8_t markers) {
 	unsigned long finishTime = 0;
 	uint8_t speed = 0;
 
-	while(!lapFinishedFlag || currentTime - finishTime < 200) {
+	bool aborted = false;
+
+	while(!aborted && (!lapFinishedFlag || currentTime - finishTime < 200)) {
 		currentTime = millis();
 		if (speed < maxspeed) {
 			if (currentTime - previousTime >= acelerationInterval) {
@@ -517,7 +491,15 @@ void Arthas::driveLap(const uint8_t markers) {
 			}
 		}
 
-		suction.update();
+		/* A tecla 0 tem de abortar a volta. Sem isto o robô só pararia ao
+		 * completar as marcas, e o comando de parada — que na pista é o botão
+		 * de emergência — não valeria em um dos dois modos de corrida. */
+		if (parseInput() == ArthasAction::Stop) {
+			aborted = true;
+			console.println("//---Volta abortada---//");
+		}
+
+		update();
 
 		uint16_t linePosition = frontSensor.readLineWhite();
 
@@ -557,7 +539,7 @@ void Arthas::chase() {
 	while (!stop) {
 		ArthasAction action = parseInput();
 
-		suction.update();
+		update();
 
 		uint16_t linePosition = frontSensor.readLineWhite();
 
@@ -568,10 +550,6 @@ void Arthas::chase() {
 		if (action == ArthasAction::Stop) {
 			stopMotors();
 			stop = true;
-		}
-		else if (action == ArthasAction::UpdateConstants) {
-			console.println("Updated Constants!");
-			this->printPID();
 		}
 	}
 

@@ -1,16 +1,16 @@
 #include <Console.h>
 
 namespace {
-    /* Trava o acumulador caso chegue lixo sem terminador de linha.
-     * O maior comando válido é o pacote de constantes do app, com 29 bytes. */
+    /* Trava o acumulador caso chegue lixo sem terminador de linha. */
     const uint16_t maxLineLength = 128;
 
     const size_t maxQueuedLines = 16;
 }
 
-Console::Console() :
-	bluetooth(),
+Console::Console(const uint8_t irReceivePin) :
+	ir(irReceivePin),
 	serialEnabled(false),
+	irEnabled(true),
 	serialAccumulator("")
 {}
 
@@ -20,19 +20,15 @@ void Console::setup(const unsigned long baudRate) {
 	Serial.begin(baudRate);     // no USB CDC o baud rate é ignorado
 	serialEnabled = true;
 
-	bluetooth.setup();
+	ir.setup();
 }
 
-Bluetooth* Console::getBluetooth() {
-	return &bluetooth;
+IrRemote* Console::getIr() {
+	return &ir;
 }
 
-bool Console::isBluetoothConnected() {
-	return bluetooth.isConnected();
-}
-
-void Console::turnOffBluetooth() {
-	bluetooth.turnOff();
+bool Console::consumeUnknownIrCode() {
+	return ir.consumeUnknownCode();
 }
 
 /* --- Entrada --- */
@@ -45,8 +41,8 @@ void Console::pollSerial() {
 
 		if (character == '\n' || character == '\r') {
 			if (serialAccumulator.length() > 0) {
-				if (serialLines.size() >= maxQueuedLines) serialLines.pop_front();
-				serialLines.push_back(serialAccumulator);
+				if (lines.size() >= maxQueuedLines) lines.pop_front();
+				lines.push_back(serialAccumulator);
 				serialAccumulator = "";
 			}
 		}
@@ -56,51 +52,59 @@ void Console::pollSerial() {
 	}
 }
 
+void Console::setIrEnabled(const bool enabled) {
+	irEnabled = enabled;
+}
+
+void Console::pollIr() {
+	if (!irEnabled) return;
+
+	const char command = ir.readCommand();
+	if (command == 0) return;
+
+	if (lines.size() >= maxQueuedLines) lines.pop_front();
+	lines.push_back(String(command));
+}
+
 bool Console::isAvailable() {
 	pollSerial();
-	return !serialLines.empty() || bluetooth.isAvailable();
+	pollIr();
+	return !lines.empty();
 }
 
 String Console::readInput() {
 	pollSerial();
+	pollIr();
 
-	if (!serialLines.empty()) {
-		const String line = serialLines.front();
-		serialLines.pop_front();
-		return line;
-	}
+	if (lines.empty()) return "";
 
-	return bluetooth.readSerialInput();
+	const String line = lines.front();
+	lines.pop_front();
+	return line;
 }
 
-/* --- Saída: espelhada nos dois canais --- */
+/* --- Saída: só a serial; o controle remoto não tem canal de volta --- */
 
 void Console::print(const String msg) {
 	if (serialEnabled) Serial.print(msg);
-	bluetooth.print(msg);
 }
 
 void Console::print(const int msg) {
 	if (serialEnabled) Serial.print(msg);
-	bluetooth.print(msg);
 }
 
 void Console::println(const String msg) {
 	if (serialEnabled) Serial.println(msg);
-	bluetooth.println(msg);
 }
 
 void Console::println(const int msg) {
 	if (serialEnabled) Serial.println(msg);
-	bluetooth.println(msg);
 }
 
 void Console::println(const uint16_t msg) {
 	if (serialEnabled) Serial.println(msg);
-	bluetooth.println(msg);
 }
 
 void Console::printDoubleln(const double msg) {
 	if (serialEnabled) Serial.println(msg, 4);
-	bluetooth.printDoubleln(msg);
 }

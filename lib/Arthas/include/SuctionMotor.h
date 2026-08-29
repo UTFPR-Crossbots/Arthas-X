@@ -32,11 +32,16 @@ class SuctionMotor {
         static const uint16_t frequency_hz = 50;
         static const uint16_t armingTime_ms = 3000;
 
-        /* Rampa de subida, no mesmo ritmo da referência de bancada: 10 us a
+        /* Rampa de SUBIDA, no mesmo ritmo da referência de bancada: 10 us a
          * cada 100 ms. A faixa toda (1488 -> 2000) leva ~5 s. É isso que
          * evita o degrau de corrente do ESC de 20 A; para largar mais rápido,
          * é este o número a subir. */
-        static const uint16_t rampRate_usPerSecond = 100;
+        static const uint16_t rampUpRate_usPerSecond = 100;
+
+        /* Rampa de DESCIDA, mais rápida: a faixa toda leva ~1,7 s. Descer não
+         * tem o pico de partida, e uma parada lenta demais é ruim para um
+         * comando que também serve de segurança. */
+        static const uint16_t rampDownRate_usPerSecond = 300;
 
         /* Teto do intervalo considerado num passo de rampa.
          *
@@ -53,7 +58,13 @@ class SuctionMotor {
         void setup();
         void setTarget(const uint8_t throttlePercent);
         void update();
+
+        /* Parada normal: desce em rampa. Depende de update() continuar sendo
+         * chamado — ver Arthas::update(). */
         void stop();
+
+        /* Corta na hora, sem rampa. Para o boot e para emergência. */
+        void stopImmediate();
 
         uint8_t getTarget() const;
         uint8_t getCurrent() const;

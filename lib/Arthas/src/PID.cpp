@@ -8,10 +8,11 @@ namespace {
     const double integralLimit = 1.0;
 }
 
-PIDController::PIDController(const uint8_t numberOfSensors):
-    Kp(50),     // erro normalizado: Kp na ordem do maxspeed é o ponto de partida
-    Ki(0),
-    Kd(0),
+PIDController::PIDController(const uint8_t numberOfSensors,
+                             const double Kp, const double Ki, const double Kd):
+    Kp(Kp),     // erro normalizado: Kp na ordem do maxspeed é o ponto de partida
+    Ki(Ki),
+    Kd(Kd),
     setPoint((numberOfSensors - 1) * 500),   //This is the middle of the sensors, if it was 10 sensors it would be 9500, because its from 0 to 9
     lastError(0),
     lastTime(0),
@@ -25,12 +26,6 @@ void PIDController::clearTimeAndError() {
     lastError = 0;
     lastTime = 0;
     integral = 0;
-}
-
-void PIDController::updatePIDConstants(const double Kp, const double Ki, const double Kd) {
-    this->Kp = Kp;
-    this->Ki = Ki;
-    this->Kd = Kd;
 }
 
 double PIDController::calculateCorrection(uint16_t linePosition) {

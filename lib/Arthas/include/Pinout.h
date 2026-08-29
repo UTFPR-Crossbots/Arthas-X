@@ -43,9 +43,15 @@ namespace pins {
      * fica intacto, então IMU e encoders seguem viáveis. */
     constexpr uint8_t suctionEsc = 10;              // net CL
 
-    /* Throttle usado durante a corrida, em %. Ajustável em runtime por
-     * "suc <0-100>"; este é só o valor com que o robô liga. */
-    constexpr uint8_t suctionRaceThrottle = 80;
+    /* --- Controle remoto infravermelho (LE-7009) ---
+     * Receptor de 38 kHz na net CTRL. Os códigos das teclas ficam em
+     * IrCodes.h e precisam ser capturados antes de o controle funcionar. */
+    constexpr uint8_t irReceiver = 9;               // net CTRL
+
+    /* --- Buzzer ativo (já tem oscilador, basta nível alto) ---
+     * Alguns módulos apitam com nível BAIXO; se ficar mudo, inverter. */
+    constexpr uint8_t buzzer = 5;                   // net BUZZER
+    constexpr bool buzzerActiveLow = false;
 
     /* --- Alocação de timers do LEDC ---
      * O core mapeia timer = (canal / 2) % 4, então canais no mesmo timer
@@ -62,11 +68,10 @@ namespace pins {
     /* --- Reservado: fora do escopo do bring-up, sem driver ainda --- */
     namespace reserved {
         constexpr uint8_t batteryVoltage    = 1;    // VBAT,   ADC1_CH0
-        constexpr uint8_t buzzer            = 5;    // BUZZER
+        /* BUZZER (5) e CTRL (9) agora têm uso — ver buzzer e irReceiver acima. */
         constexpr uint8_t imuInterrupt1     = 6;    // INT1
         constexpr uint8_t imuInterrupt2     = 7;    // INT2
         constexpr uint8_t leftCurrentSense  = 8;    // L_CS,   ADC1_CH7 (IPROPI)
-        constexpr uint8_t control           = 9;    // CTRL,   função não identificada
         /* CL (10) é o sinal do ESC de sucção — ver suctionEsc acima. */
         constexpr uint8_t spiMosi           = 11;   // MOSI
         constexpr uint8_t spiSclk           = 12;   // SCLK

@@ -1,40 +1,52 @@
 #pragma once
 #include <Arduino.h>
 #include <deque>
-#include "Bluetooth.h"
+#include "IrRemote.h"
 
 /*
- * Une os dois canais de comando do robô num só:
+ * Une as duas fontes de comando do robô numa só:
  *
- *  - BLE (Nordic UART Service), que continua sendo o modo de operação;
- *  - porta serial USB, para testar o robô na bancada sem depender do celular.
+ *  - controle infravermelho, que é o modo de operação na pista;
+ *  - porta serial USB, para bancada.
  *
- * A saída é espelhada nos dois; a entrada é lida de quem tiver dado. Assim o
- * despacho de comandos em Arthas::parseInput() não precisa saber de onde veio
- * a linha, e os dois links funcionam ao mesmo tempo.
+ * As duas entram na MESMA fila de linhas: o IR traduz a tecla numérica para o
+ * comando de uma letra que a serial já usa (ver IrCodes.h). Assim
+ * Arthas::parseInput() não sabe — nem precisa saber — de onde veio a
+ * instrução, e o despacho de comandos continua sendo um só.
  *
- * Atenção: nesta placa o UART0 (GPIO 43/44) não está conectado, então "Serial"
- * só existe se o firmware for compilado com -DARDUINO_USB_CDC_ON_BOOT=1, que
- * faz o Serial apontar para o USB nativo (GPIO 19/20). Ver platformio.ini.
+ * A saída vai só para a serial: o controle remoto não tem canal de volta, e é
+ * por isso que existe o buzzer.
+ *
+ * Nesta placa o UART0 (GPIO 43/44) não está conectado, então "Serial" só
+ * existe compilando com -DARDUINO_USB_CDC_ON_BOOT=1, que o aponta para o USB
+ * nativo (GPIO 19/20). Ver platformio.ini.
  */
 class Console {
     private:
-        Bluetooth bluetooth;
+        IrRemote ir;
         bool serialEnabled;
+        bool irEnabled;
         String serialAccumulator;
-        std::deque<String> serialLines;
+        std::deque<String> lines;
 
         void pollSerial();
+        void pollIr();
 
     public:
-        Console();
+        Console(const uint8_t irReceivePin);
         ~Console();
 
         void setup(const unsigned long baudRate = 115200);
 
-        Bluetooth* getBluetooth();
-        bool isBluetoothConnected();
-        void turnOffBluetooth();
+        IrRemote* getIr();
+
+        /* Durante a captura de códigos os frames precisam chegar crus ao
+         * captureRaw(), e não virar comando na fila. */
+        void setIrEnabled(const bool enabled);
+
+        /* True se a última leitura trouxe um código IR fora da tabela — o
+         * chamador usa isso para o beep de "não entendi". */
+        bool consumeUnknownIrCode();
 
         bool isAvailable();
         String readInput();

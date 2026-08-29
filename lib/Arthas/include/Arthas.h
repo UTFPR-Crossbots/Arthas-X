@@ -1,6 +1,7 @@
 #pragma once
 #include "PID.h"
 #include "Console.h"
+#include "Buzzer.h"
 #include "FrontSensor.h"
 #include "LateralSensor.h"
 #include "Powertrain.h"
@@ -16,48 +17,44 @@ enum class ArthasAction {
     FrontSensorTestWhileLine,
     LateralSensorTest,
     SuctionTest,
+    IrCapture,
     Calibrate,
-    UpdateConstants,
+    SensorMaskChanged,
     ShowStatus,
     ShowMenu,
     DriveLap,
     Chase,
-    Stop,
-    BluetoothConnected,
-    BluetoothDisconnected
+    Stop
 };
 
 class Arthas {
     private:
         Console console;
+        Buzzer buzzer;
         Powertrain powertrain;
         FrontSensor frontSensor;
         LateralSensor lateralSensorLeft;
         LateralSensor lateralSensorRight;
         SuctionMotor suction;
         PIDController pid;
-        int16_t maxspeed;
-        double tempo;
-        uint8_t marcas;
 
-        /* Fração do maxspeed que a roda interna pode girar em RÉ para fechar
-         * curva. 0 trava as rodas em só para frente. Ajustável por "rev <%>". */
-        double reverseRatio;
+        const int16_t maxspeed;
+        const uint8_t marcas;
+        const double reverseRatio;
+        const uint8_t suctionThrottle;
 
-        /* Throttle da sucção durante a corrida, em %. Ajustável por "suc <n>". */
-        uint8_t suctionThrottle;
-
-        /* Comandos "kp 0.35", "vel 120" etc., pensados para digitar na serial.
-         * Devolve true se a linha era um desses e já foi aplicada. */
-        bool parseValueCommand(const String& input);
-
-        /* Único ponto onde a correção do PID vira velocidade de roda — inclusive
-         * a decisão de deixar (ou não) a roda interna entrar em ré. */
+        /* Único ponto onde a correção do PID vira velocidade de roda —
+         * inclusive a decisão de deixar (ou não) a roda interna entrar em ré. */
         void applyCorrection(const int16_t baseSpeed, const double correction);
+
+        /* Habilita/desabilita um sensor da barra ("off 11" / "on 11").
+         * Devolve true se a linha era um desses. */
+        bool parseSensorMaskCommand(const String& input);
 
     public:
         /* leftMotorPins/rightMotorPins = {direção, pwm} (DRV8874 em PH/EN).
-         * frontSensorSelectPins = {S0, S1, S2, S3} do CD74HC4067, S0 é o LSB. */
+         * frontSensorSelectPins = {S0, S1, S2, S3} do CD74HC4067, S0 é o LSB.
+         * Constantes de ajuste vêm de Tuning.h, via main.cpp. */
         Arthas(const uint8_t* leftMotorPins,
                const uint8_t* rightMotorPins,
                const uint8_t frontSensorCommonPin,
@@ -67,15 +64,21 @@ class Arthas {
                const uint8_t rightLateralSensorPin,
                const uint8_t suctionEscPin,
                const uint8_t suctionPwmTimer,
-               const uint8_t suctionRaceThrottle,
-               const int16_t maxspeed,
+               const uint8_t irReceiverPin,
+               const uint8_t buzzerPin,
+               const bool buzzerActiveLow,
                const bool invertLeftMotor = false,
                const bool invertRightMotor = false);
         ~Arthas();
 
-        /* Comunicação (BLE + serial USB) */
+        /* Avança tudo que é não bloqueante: rampa da sucção e buzzer.
+         * PRECISA ser chamado toda iteração, tanto pelo loop() principal
+         * quanto pelos loops de modo — senão a rampa de desaceleração
+         * congela no ponto em que o modo terminou. */
+        void update();
+
+        /* Comunicação (IR + serial USB) */
         Console* getConsole();
-        Bluetooth* getBluetooth();
         void setupConsole();
         const bool isInputAvailable();
         String readInput();
@@ -84,7 +87,6 @@ class Arthas {
         void print(const int msg);
         void println(const String msg = "");
         void println(const int msg);
-        void turnOffBluetooth();
 
         /* Line Sensors */
         void setupFrontSensor();
@@ -102,6 +104,13 @@ class Arthas {
         void setupSuction();
         void testSuction();
 
+        /* Buzzer */
+        void setupBuzzer();
+        void beepReady();
+
+        /* Infravermelho */
+        void captureIrCodes();
+
         /* Motors */
         void setupMotors();
         void stopMotors();
@@ -109,7 +118,7 @@ class Arthas {
         void testRightMotor();
         void testBothMotors();
 
-        /* Constants */
+        /* Info */
         void printMenu();
         void printStatus();
         void reportDisabledSensors();
@@ -117,7 +126,6 @@ class Arthas {
         void printPID();
 
         /* Modes */
-        void driveLap(const uint8_t markers);
-        void driveLapTest();
+        void driveLap();
         void chase();
 };

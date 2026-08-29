@@ -24,11 +24,11 @@ class PIDController {
         unsigned long lastTime;
 
     public:
-        PIDController(const uint8_t numberOfSensors);
+        PIDController(const uint8_t numberOfSensors,
+                      const double Kp, const double Ki, const double Kd);
         ~PIDController();
 
         void clearTimeAndError();
-        void updatePIDConstants(const double Kp, const double Ki, const double Kd);
         double calculateCorrection(uint16_t linePosition);
         const double getP();
         const double getI();

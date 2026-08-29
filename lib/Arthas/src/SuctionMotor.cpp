@@ -46,29 +46,39 @@ void SuctionMotor::update() {
     lastUpdate = now;
 
     /* Limita o passo: um intervalo longo desde a última chamada não pode
-     * virar um degrau que atravessa a faixa inteira. */
+     * virar um degrau que atravessa a faixa inteira. Vale para os dois
+     * sentidos. */
     if (elapsed > maxStepInterval_ms) elapsed = maxStepInterval_ms;
 
     const double target = throttleToPulse(targetThrottle);
-    const double maxStep = (rampRate_usPerSecond * (double)elapsed) / 1000.0;
+
+    if (currentPulse_us == target) return;
+
+    /* Subir e descer têm ritmos diferentes: só a subida tem pico de partida. */
+    const uint16_t rate = (currentPulse_us < target) ? rampUpRate_usPerSecond
+                                                     : rampDownRate_usPerSecond;
+    const double maxStep = (rate * (double)elapsed) / 1000.0;
 
     if (currentPulse_us < target) {
         currentPulse_us += maxStep;
         if (currentPulse_us > target) currentPulse_us = target;
     }
-    else if (currentPulse_us > target) {
+    else {
         currentPulse_us -= maxStep;
         if (currentPulse_us < target) currentPulse_us = target;
-    }
-    else {
-        return;
     }
 
     esc.writeMicroseconds((int)currentPulse_us);
 }
 
 void SuctionMotor::stop() {
-    /* Parada é imediata, sem rampa: é o caminho de segurança. */
+    /* Só define o alvo: quem desce até lá é update(), em rampa. Cortar de uma
+     * vez de 2000 para o neutro faz o ESC frear o rotor, e o pico de corrente
+     * disso é o mesmo problema que a rampa de subida evita na partida. */
+    targetThrottle = 0;
+}
+
+void SuctionMotor::stopImmediate() {
     targetThrottle = 0;
     currentPulse_us = neutralPulse_us;
     lastUpdate = millis();
