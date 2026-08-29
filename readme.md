@@ -75,6 +75,7 @@ Valem nos dois canais.
 | **Motores** (robô suspenso!) | |
 | `j` / `k` | Testar motor esquerdo / direito |
 | `f` | Testar os dois motores |
+| `l` | Testar a sucção (ESC) |
 | `c` | **Parar** — também sai de qualquer teste contínuo |
 | **Modos** | |
 | `e` | `chase` — segue a linha até receber `c` |
@@ -85,6 +86,7 @@ Valem nos dois canais.
 | `vel <0-255>` | Velocidade máxima |
 | `marcas <n>` | Marcas para fechar a volta |
 | `rev <0-100>` | Quanto a roda interna pode ir de ré, em % do `maxspeed` (padrão 50) |
+| `suc <0-100>` | Throttle da sucção durante a corrida, em % (padrão 80) |
 
 Os comandos com valor (`kp`, `vel`, ...) existem porque o pacote de texto de 29 caracteres do app é
 inviável de digitar à mão. Esse pacote continua funcionando, para o app não quebrar.
@@ -139,6 +141,40 @@ de `minimumCalibrationRange` (100 contagens de ADC). Sensor desabilitado:
 `off <n>` e `on <n>` forçam na mão, para o caso de um sensor intermitente passar pela detecção
 automática. Recalibrar refaz a detecção e sobrescreve o que foi forçado.
 
+---
+
+## Motor de sucção (ESC LittleBee Spring 20A)
+
+Sinal no **GPIO 10** (net `CL`), canal 2 do LEDC. Liga automaticamente no `chase` e no `driveLap`,
+e o `c` (parar) corta junto com os motores — `stopMotors()` desliga os dois.
+
+O LittleBee Spring é um BLHeli_S: fala **PWM de servo (1000–2000 µs a 50 Hz)**, não o PWM de ponte H
+dos motores de tração. Por isso tem driver próprio,
+[`SuctionMotor`](lib/Arthas/include/SuctionMotor.h), e não reaproveita o `MotorArthas`.
+
+- **Armação.** O BLHeli só aceita comando depois de receber throttle mínimo por ~2 s. O
+  `setupSuction()` é a **primeira** coisa do `setup()`, justamente para o ESC armar durante o resto
+  do boot (o NimBLE demora). `isArmed()` impede acelerar antes disso.
+- **Rampa.** Um ESC de 20 A puxando corrente num degrau derruba a tensão da placa. `setTarget()` só
+  define o alvo; `update()` caminha até ele a 200 %/s (0→100 % em 0,5 s) e **não bloqueia** — é
+  chamado de dentro da malha de controle, sem atrapalhar o seguimento de linha.
+- **Parada** é imediata, sem rampa: é o caminho de segurança.
+
+O `CL` não aparecia com função definida em nenhuma das folhas de esquemático, então o barramento SPI
+(`MOSI` 11, `SCLK` 12, `MISO` 13) fica intacto — IMU e encoders seguem viáveis.
+
+### Alocação de canais do LEDC
+
+O core mapeia `timer = (canal / 2) % 4`, então canais no mesmo timer compartilham frequência:
+
+| Canal | Timer | Uso | Config |
+|---|---|---|---|
+| 0 | 0 | Motor esquerdo | 20 kHz, 8 bits |
+| 1 | 0 | Motor direito | 20 kHz, 8 bits |
+| 2 | 1 | Sucção / ESC | 50 Hz, 16 bits |
+
+A sucção precisa sair do par 0/1 justamente porque 50 Hz e 20 kHz não cabem no mesmo timer.
+
 ## Hardware — o que mudou em relação à placa antiga
 
 | | Antiga | Nova |
@@ -162,8 +198,8 @@ A pinagem completa, incluindo os pinos ainda sem driver, está em
 - **`R_CS` (GPIO 14) cai no ADC2**, compartilhado com o rádio; leitura pouco confiável.
 - **`nFAULT` dos DRV8874 não chega ao ESP32** — o firmware não tem como detectar falha do driver.
 - **GPIO 39–42 são os pinos de JTAG**, então não há debug por JTAG nesta placa.
-- **`CTRL` (GPIO 9) e `CL` (GPIO 10)** não aparecem em nenhuma das folhas de esquemático
-  disponíveis; estão reservados no `Pinout.h`, sem uso.
+- **`CTRL` (GPIO 9)** não aparece em nenhuma das folhas de esquemático disponíveis; está reservado
+  no `Pinout.h`, sem uso.
 
 ### Ainda sem driver
 

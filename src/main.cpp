@@ -12,12 +12,20 @@ Arthas arthas = Arthas(
 	pins::frontSensorCount,
 	pins::lateralSensorLeft,
 	pins::lateralSensorRight,
+	pins::suctionEsc,
+	pins::suctionLedcChannel,
+	pins::suctionRaceThrottle,
 	maxspeed,
 	pins::leftMotorInverted,
 	pins::rightMotorInverted
 );
 
 void setup() {
+	/* Primeiro de tudo: o ESC so arma depois de receber throttle minimo por
+	 * ~2 s, e o setupConsole() (NimBLE) demora. Comecar por aqui faz o ESC
+	 * armar durante o resto do boot. */
+	arthas.setupSuction();
+
 	arthas.setupConsole();
 	arthas.setupMotors();
 	arthas.setupFrontSensor();
@@ -53,6 +61,9 @@ void loop() {
 				break;
 			case ArthasAction::LateralSensorTest:
 				arthas.testLateralSensor();
+				break;
+			case ArthasAction::SuctionTest:
+				arthas.testSuction();
 				break;
 			case ArthasAction::Calibrate:
 				arthas.calibrateFrontSensor();

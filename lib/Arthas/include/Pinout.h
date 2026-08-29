@@ -33,6 +33,31 @@ namespace pins {
     constexpr bool leftMotorInverted  = false;
     constexpr bool rightMotorInverted = false;
 
+    /* --- Motor de sucção: ESC LittleBee Spring 20A (BLHeli_S) ---
+     *
+     * Fala PWM de servo (1000-2000 us a 50 Hz), não o PWM de ponte H dos
+     * motores de tração — por isso tem driver próprio, SuctionMotor.
+     *
+     * Sai na net CL, que não aparecia com função definida em nenhuma das
+     * folhas de esquemático. O barramento SPI (MOSI 11, SCLK 12, MISO 13)
+     * fica intacto, então IMU e encoders seguem viáveis. */
+    constexpr uint8_t suctionEsc = 10;              // net CL
+
+    /* Throttle usado durante a corrida, em %. Ajustável em runtime por
+     * "suc <0-100>"; este é só o valor com que o robô liga. */
+    constexpr uint8_t suctionRaceThrottle = 80;
+
+    /* --- Alocação de canais do LEDC ---
+     * O core mapeia timer = (canal / 2) % 4, então canais que compartilham
+     * timer compartilham frequência. Motores (0 e 1) ficam juntos no timer 0
+     * a 20 kHz; a sucção precisa de 50 Hz, logo tem de sair desse par.
+     *
+     *   0 -> motor esquerdo   (timer 0, 20 kHz, 8 bits)
+     *   1 -> motor direito    (timer 0, 20 kHz, 8 bits)
+     *   2 -> sucção / ESC     (timer 1, 50 Hz, 16 bits)
+     */
+    constexpr uint8_t suctionLedcChannel = 2;
+
     /* --- Reservado: fora do escopo do bring-up, sem driver ainda --- */
     namespace reserved {
         constexpr uint8_t batteryVoltage    = 1;    // VBAT,   ADC1_CH0
@@ -41,7 +66,7 @@ namespace pins {
         constexpr uint8_t imuInterrupt2     = 7;    // INT2
         constexpr uint8_t leftCurrentSense  = 8;    // L_CS,   ADC1_CH7 (IPROPI)
         constexpr uint8_t control           = 9;    // CTRL,   função não identificada
-        constexpr uint8_t cl                = 10;   // CL,     função não identificada
+        /* CL (10) é o sinal do ESC de sucção — ver suctionEsc acima. */
         constexpr uint8_t spiMosi           = 11;   // MOSI
         constexpr uint8_t spiSclk           = 12;   // SCLK
         constexpr uint8_t spiMiso           = 13;   // MISO

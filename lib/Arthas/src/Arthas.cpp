@@ -13,6 +13,9 @@ Arthas::Arthas(const uint8_t* leftMotorPins,
                const uint8_t numberOfFrontSensors,
                const uint8_t leftLateralSensorPin,
                const uint8_t rightLateralSensorPin,
+               const uint8_t suctionEscPin,
+               const uint8_t suctionLedcChannel,
+               const uint8_t suctionRaceThrottle,
                const int16_t maxspeed,
                const bool invertLeftMotor,
                const bool invertRightMotor):
@@ -21,11 +24,13 @@ Arthas::Arthas(const uint8_t* leftMotorPins,
 	frontSensor(frontSensorCommonPin, frontSensorSelectPins, numberOfFrontSensors),
 	lateralSensorLeft(leftLateralSensorPin, true),
 	lateralSensorRight(rightLateralSensorPin, false),
+	suction(suctionEscPin, suctionLedcChannel),
 	pid(numberOfFrontSensors),
 	maxspeed(maxspeed),
 	tempo(0),
 	marcas(0),
-	reverseRatio(0.5)
+	reverseRatio(0.5),
+	suctionThrottle(suctionRaceThrottle)
 {}
 
 Arthas::~Arthas() {
@@ -71,6 +76,10 @@ bool Arthas::parseValueCommand(const String& input) {
 	}
 	if (input.startsWith("marcas ")) {
 		marcas = (uint8_t)input.substring(7).toInt();
+		return true;
+	}
+	if (input.startsWith("suc ")) {
+		suctionThrottle = (uint8_t)constrain(input.substring(4).toInt(), 0, 100);
 		return true;
 	}
 	if (input.startsWith("rev ")) {
@@ -157,6 +166,9 @@ ArthasAction Arthas::parseInput() {
 	}
 	else if (input == "k") {
 		return ArthasAction::RightMotorTest;
+	}
+	else if (input == "l") {
+		return ArthasAction::SuctionTest;
 	}
 	else if (input == "s") {
 		return ArthasAction::ShowStatus;
@@ -319,6 +331,41 @@ void Arthas::testLateralSensor() {
 	}
 }
 
+/* Suction */
+void Arthas::setupSuction() {
+	suction.setup();
+}
+
+void Arthas::testSuction() {
+	if (!suction.isArmed()) {
+		console.println("ESC ainda armando, aguarde...");
+		/* delay() cede o processador: um spin vazio aqui starva a idle task
+		 * e derruba o watchdog. */
+		while (!suction.isArmed()) delay(1);
+	}
+
+	console.print("Succao a ");
+	console.print((int)suctionThrottle);
+	console.println("%. 'c' para parar.");
+
+	suction.setTarget(suctionThrottle);
+
+	unsigned long lastPrint = 0;
+	while (parseInput() != ArthasAction::Stop) {
+		suction.update();
+
+		if (millis() - lastPrint > 500) {
+			console.print("throttle: ");
+			console.print((int)suction.getCurrent());
+			console.println("%");
+			lastPrint = millis();
+		}
+	}
+
+	suction.stop();
+	console.println("Succao parada.");
+}
+
 /* Motors */
 void Arthas::setupMotors() {
 	powertrain.setup();
@@ -326,6 +373,8 @@ void Arthas::setupMotors() {
 
 void Arthas::stopMotors() {
 	powertrain.stopMotors();
+	/* Parar e parar tudo: a succao nao pode continuar girando apos o 'c'. */
+	suction.stop();
 }
 
 void Arthas::testLeftMotor() {
@@ -364,6 +413,7 @@ void Arthas::printMenu() {
 	console.println("  j   testar motor esquerdo");
 	console.println("  k   testar motor direito");
 	console.println("  f   testar os dois motores");
+	console.println("  l   testar succao (ESC)");
 	console.println("  c   PARAR (sai dos testes continuos)");
 	console.println();
 	console.println(" MODOS");
@@ -377,6 +427,7 @@ void Arthas::printMenu() {
 	console.println("  vel <0-255>      velocidade maxima");
 	console.println("  marcas <n>       marcas para fechar a volta");
 	console.println("  rev <0-100>      re da roda interna, % do maxspeed");
+	console.println("  suc <0-100>      throttle da succao na corrida");
 	console.println("  s                mostrar estado atual");
 	console.println();
 	console.println("  ?   mostrar este menu");
@@ -416,6 +467,11 @@ void Arthas::printStatus() {
 	console.print("barra calibrada: ");
 	console.println(frontSensor.isCalibrated() ? "sim" : "nao");
 	reportDisabledSensors();
+	console.print("succao (corrida): ");
+	console.print((int)suctionThrottle);
+	console.print("% | saindo agora: ");
+	console.print((int)suction.getCurrent());
+	console.println("%");
 	console.print("re da roda interna: ");
 	console.print((int)(reverseRatio * 100));
 	console.println("% do maxspeed");
@@ -441,6 +497,10 @@ void Arthas::printPID() {
 /* Modes */
 void Arthas::driveLap(const uint8_t markers) {
 	println("//---Comecando primeira volta---//");
+
+	/* A succao entra junto com a corrida; update() faz a rampa dentro da
+	 * malha, sem bloquear o controle da linha. */
+	suction.setTarget(suctionThrottle);
 	// println("//---Turning off the bluetooth---//");
 	// turnOffBluetooth();
 
@@ -461,6 +521,8 @@ void Arthas::driveLap(const uint8_t markers) {
 				previousTime = currentTime;
 			}
 		}
+
+		suction.update();
 
 		uint16_t linePosition = frontSensor.readLineWhite();
 
@@ -495,8 +557,13 @@ void Arthas::chase() {
 	console.println("--- Starting! ---");
 	bool stop = false;
 
+	suction.setTarget(suctionThrottle);
+
 	while (!stop) {
 		ArthasAction action = parseInput();
+
+		suction.update();
+
 		uint16_t linePosition = frontSensor.readLineWhite();
 
 		double correction = pid.calculateCorrection(linePosition);

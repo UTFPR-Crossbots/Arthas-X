@@ -4,6 +4,7 @@
 #include "FrontSensor.h"
 #include "LateralSensor.h"
 #include "Powertrain.h"
+#include "SuctionMotor.h"
 
 enum class ArthasAction {
     None = 0,
@@ -14,6 +15,7 @@ enum class ArthasAction {
     FrontSensorTestAnalogRead,
     FrontSensorTestWhileLine,
     LateralSensorTest,
+    SuctionTest,
     Calibrate,
     UpdateConstants,
     ShowStatus,
@@ -32,6 +34,7 @@ class Arthas {
         FrontSensor frontSensor;
         LateralSensor lateralSensorLeft;
         LateralSensor lateralSensorRight;
+        SuctionMotor suction;
         PIDController pid;
         int16_t maxspeed;
         double tempo;
@@ -40,6 +43,9 @@ class Arthas {
         /* Fração do maxspeed que a roda interna pode girar em RÉ para fechar
          * curva. 0 trava as rodas em só para frente. Ajustável por "rev <%>". */
         double reverseRatio;
+
+        /* Throttle da sucção durante a corrida, em %. Ajustável por "suc <n>". */
+        uint8_t suctionThrottle;
 
         /* Comandos "kp 0.35", "vel 120" etc., pensados para digitar na serial.
          * Devolve true se a linha era um desses e já foi aplicada. */
@@ -59,6 +65,9 @@ class Arthas {
                const uint8_t numberOfFrontSensors,
                const uint8_t leftLateralSensorPin,
                const uint8_t rightLateralSensorPin,
+               const uint8_t suctionEscPin,
+               const uint8_t suctionLedcChannel,
+               const uint8_t suctionRaceThrottle,
                const int16_t maxspeed,
                const bool invertLeftMotor = false,
                const bool invertRightMotor = false);
@@ -88,6 +97,10 @@ class Arthas {
         /* Lateral Sensors */
         void setupLateralSensors();
         void testLateralSensor();
+
+        /* Suction */
+        void setupSuction();
+        void testSuction();
 
         /* Motors */
         void setupMotors();
