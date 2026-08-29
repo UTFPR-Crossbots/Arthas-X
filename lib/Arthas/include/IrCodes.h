@@ -26,16 +26,16 @@ namespace ir {
 
     /* Índice = dígito da tecla. Zero significa "ainda não capturado". */
     constexpr uint64_t keyCode[10] = {
-        0x0,    // tecla 0  -> PARAR
-        0x0,    // tecla 1  -> calibrar a barra
-        0x0,    // tecla 2  -> chase
-        0x0,    // tecla 3  -> volta (driveLap)
-        0x0,    // tecla 4  -> barra frontal, cru do ADC
-        0x0,    // tecla 5  -> barra frontal, calibrado
-        0x0,    // tecla 6  -> sensores laterais
-        0x0,    // tecla 7  -> motor esquerdo
-        0x0,    // tecla 8  -> motor direito
-        0x0,    // tecla 9  -> sucção (ESC)
+        0x0910,    // tecla 0  -> PARAR
+        0x010,    // tecla 1  -> calibrar a barra
+        0x0810,    // tecla 2  -> chase
+        0x0410,    // tecla 3  -> volta (driveLap)
+        0x0c10,    // tecla 4  -> barra frontal, cru do ADC
+        0x0210,    // tecla 5  -> barra frontal, calibrado
+        0x0a10,    // tecla 6  -> sensores laterais
+        0x0610,    // tecla 7  -> motor esquerdo
+        0x0e10,    // tecla 8  -> motor direito
+        0x0110,    // tecla 9  -> sucção (ESC)
     };
 
     /*
