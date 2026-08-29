@@ -40,10 +40,14 @@ void SuctionMotor::setTarget(const uint8_t throttlePercent) {
 
 void SuctionMotor::update() {
     const unsigned long now = millis();
-    const unsigned long elapsed = now - lastUpdate;
+    unsigned long elapsed = now - lastUpdate;
 
     if (elapsed == 0) return;
     lastUpdate = now;
+
+    /* Limita o passo: um intervalo longo desde a última chamada não pode
+     * virar um degrau que atravessa a faixa inteira. */
+    if (elapsed > maxStepInterval_ms) elapsed = maxStepInterval_ms;
 
     const double target = throttleToPulse(targetThrottle);
     const double maxStep = (rampRate_usPerSecond * (double)elapsed) / 1000.0;

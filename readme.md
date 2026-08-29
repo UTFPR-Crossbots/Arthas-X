@@ -162,8 +162,15 @@ ESC unidirecional. Mandar 1000 µs **não liga o motor** — a faixa útil para 
   `setupSuction()` é a **primeira** coisa do `setup()` e **bloqueia** esses 3 s: até terminar o ESC
   ignora qualquer comando, então não há o que fazer em paralelo. O boot inteiro leva ~5 s.
 - **Rampa.** Um ESC de 20 A puxando corrente num degrau derruba a tensão da placa. `setTarget()` só
-  define o alvo; `update()` caminha até ele a 250 µs/s (faixa toda em ~2 s) e **não bloqueia** — é
-  chamado de dentro da malha de controle, sem atrapalhar o seguimento de linha.
+  define o alvo; `update()` caminha até ele a **100 µs/s** (faixa toda em ~5 s, o mesmo ritmo da
+  referência de bancada: 10 µs a cada 100 ms) e **não bloqueia** — é chamado de dentro da malha de
+  controle, sem atrapalhar o seguimento de linha. Para largar mais rápido, subir
+  `rampRate_usPerSecond`.
+
+  `update()` limita cada passo a `maxStepInterval_ms` (50 ms). Sem esse teto, a primeira chamada
+  depois de um intervalo parado — entre o boot e o comando de largada, por exemplo — veria o
+  intervalo inteiro como `elapsed` e daria um passo que atravessa os 512 µs de uma vez, ligando o
+  motor em degrau justamente onde a rampa deveria agir.
 - **Parada** é imediata, sem rampa: é o caminho de segurança.
 
 O `CL` não aparecia com função definida em nenhuma das folhas de esquemático, então o barramento SPI

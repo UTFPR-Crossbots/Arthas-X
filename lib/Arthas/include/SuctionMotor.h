@@ -32,10 +32,20 @@ class SuctionMotor {
         static const uint16_t frequency_hz = 50;
         static const uint16_t armingTime_ms = 3000;
 
-        /* Rampa de subida. A referência de bancada subia 10 us a cada 100 ms
-         * (100 us/s); 250 us/s leva a faixa toda em ~2 s, que é mais razoável
-         * para largada sem dar degrau de corrente no ESC de 20 A. */
-        static const uint16_t rampRate_usPerSecond = 250;
+        /* Rampa de subida, no mesmo ritmo da referência de bancada: 10 us a
+         * cada 100 ms. A faixa toda (1488 -> 2000) leva ~5 s. É isso que
+         * evita o degrau de corrente do ESC de 20 A; para largar mais rápido,
+         * é este o número a subir. */
+        static const uint16_t rampRate_usPerSecond = 100;
+
+        /* Teto do intervalo considerado num passo de rampa.
+         *
+         * Sem ele, a PRIMEIRA chamada de update() depois de um intervalo
+         * parado (entre o boot e o comando de largada, por exemplo) veria
+         * "elapsed" valendo esse intervalo inteiro e daria um passo enorme —
+         * vencendo os 512 us de faixa de uma vez e ligando o motor em degrau,
+         * exatamente o que a rampa existe para evitar. */
+        static const uint16_t maxStepInterval_ms = 50;
 
         SuctionMotor(const uint8_t signalPin, const uint8_t pwmTimer);
         ~SuctionMotor();
